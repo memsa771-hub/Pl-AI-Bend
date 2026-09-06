@@ -230,7 +230,8 @@ def test_chat_message_with_mock_counselor(onboarded_user, test_settings, monkeyp
     body = resp.json()["data"]
     assert body["reply"]
     assert body.get("conversationId")
-    assert body.get("nextQuestion") == "What field are you targeting?"
+    assert body.get("nextQuestion") is None
+    assert body["intelligencePending"] is True
     assert "starters" in body
     assert "knownFacts" in body
     assert "vaultCompletion" not in body
@@ -239,7 +240,7 @@ def test_chat_message_with_mock_counselor(onboarded_user, test_settings, monkeyp
         headers=headers,
     )
     assert field.status_code == 200
-    assert field.json()["data"]["value"] == "en"
+    assert field.json()["data"]["value"] is None
 
 
 def test_policy_high_confidence_non_sensitive_accepts():

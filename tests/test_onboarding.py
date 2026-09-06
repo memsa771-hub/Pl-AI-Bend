@@ -263,7 +263,9 @@ def test_cv_upload_completes_onboarding_without_form(verified_user, monkeypatch)
                 document_id=doc.id,
                 person_id=person.id,
                 idempotency_key=f"extract-{doc.id}",
-                status="pending",
+                status="processing",
+                attempts=1,
+                locked_at=__import__("datetime").datetime.now(__import__("datetime").UTC),
             )
         )
         await session.commit()

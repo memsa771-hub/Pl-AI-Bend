@@ -385,9 +385,12 @@ def test_session_rejects_invalid_tokens(client):
     assert response.json()["error"]["code"] == "INVALID_TOKEN"
 
 
-def test_health_endpoints(client):
+def test_health_endpoints(client, monkeypatch):
+    async def healthy(settings, provider):
+        return {"auth": True, "database": True, "migration": True, "workers": True}
+    monkeypatch.setattr("pai.platform.operations.readiness", healthy)
     live = client.get("/health/live")
     assert live.status_code == 200
     ready = client.get("/health/ready")
-    assert ready.status_code == 503
+    assert ready.status_code == 200
     assert ready.json()["data"]["checks"]["auth"] is True

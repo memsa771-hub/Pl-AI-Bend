@@ -68,6 +68,7 @@ async def create_resource(
     from pai.domains.goals.service import mark_intelligence_stale_for_vault_update
     await mark_intelligence_stale_for_vault_update(session, person.id, model.__tablename__)
     await session.commit()
+    await session.refresh(row)
     return row
 
 
@@ -95,6 +96,7 @@ async def update_resource(
     from pai.domains.goals.service import mark_intelligence_stale_for_vault_update
     await mark_intelligence_stale_for_vault_update(session, person.id, model.__tablename__)
     await session.commit()
+    await session.refresh(row)
     return row
 
 

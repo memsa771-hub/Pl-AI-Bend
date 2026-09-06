@@ -261,7 +261,7 @@ async def build_vault_status(
     }
     snapshot = {"active_keys": set(sparse.keys()), "typed_present": typed_present}
     scopes: list[str] = list(vault.applicable_scopes or ["universal"])
-    fields = [f for f in _scope_fields(scopes) if not f.derived]
+    fields = list(_scope_fields(scopes))
 
     filled: list[dict[str, Any]] = []
     empty: list[dict[str, Any]] = []
@@ -270,6 +270,8 @@ async def build_vault_status(
 
     for field in sorted(fields, key=lambda f: (f.priority, f.section, f.key)):
         present = field_is_present_in_snapshot(person, field, snapshot)
+        if field.derived and not present:
+            continue
         item = {
             "key": field.key,
             "label": _field_label(field),

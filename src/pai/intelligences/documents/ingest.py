@@ -87,17 +87,18 @@ async def create_document_upload(
         session.add(version)
         await session.flush()
         doc.current_version_id = version.id
-        session.add(
-            DocumentJob(
-                document_id=doc.id,
-                document_version_id=version.id,
-                person_id=person.id,
-                idempotency_key=f"extract-{version.id}",
-                status="processing" if inline_processing else "pending",
-                attempts=1 if inline_processing else 0,
-                locked_at=datetime.now(UTC) if inline_processing else None,
+        if source != "ai_generated":
+            session.add(
+                DocumentJob(
+                    document_id=doc.id,
+                    document_version_id=version.id,
+                    person_id=person.id,
+                    idempotency_key=f"extract-{version.id}",
+                    status="processing" if inline_processing else "pending",
+                    attempts=1 if inline_processing else 0,
+                    locked_at=datetime.now(UTC) if inline_processing else None,
+                )
             )
-        )
         await session.commit()
     except Exception:
         await session.rollback()

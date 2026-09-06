@@ -220,7 +220,7 @@ def _row_dict(row: Any) -> dict[str, Any]:
     for k, v in list(data.items()):
         if hasattr(v, "isoformat"):
             data[k] = v.isoformat()
-        elif hasattr(v, "hex"):
+        elif isinstance(v, uuid_mod.UUID):
             data[k] = str(v)
     return data
 
