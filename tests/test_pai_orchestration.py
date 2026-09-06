@@ -70,10 +70,10 @@ def test_greetings_skip_extraction():
 
 def test_web_search_uses_semantic_decision_and_availability(test_settings):
     on = test_settings.model_copy(update={"tavily_api_key": "test", "enable_counselor_tools": True})
-    assert counselor_web_search_enabled(on, "hello", understanding=SimpleNamespace(needs_research=True))
-    assert not counselor_web_search_enabled(on, "deadline", understanding=SimpleNamespace(needs_research=False))
+    assert counselor_web_search_enabled(on, "hello", understanding=SimpleNamespace(research_state="required"))
+    assert not counselor_web_search_enabled(on, "deadline", understanding=SimpleNamespace(research_state="not_required"))
     off = on.model_copy(update={"tavily_api_key": ""})
-    assert not counselor_web_search_enabled(off, understanding=SimpleNamespace(needs_research=True))
+    assert not counselor_web_search_enabled(off, understanding=SimpleNamespace(research_state="required"))
 
 
 def test_classify_turn_uses_validated_understanding():

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,3 +39,17 @@ class PersonJob(Base):
         Index("ix_person_jobs_poll", "status", "available_at"),
         Index("ix_person_jobs_person_status", "person_id", "status"),
     )
+
+
+class UsageCounter(Base):
+    __tablename__ = "usage_counters"
+    key: Mapped[str] = mapped_column(String(160), primary_key=True)
+    used: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    __table_args__ = (Index("ix_usage_counters_expiry", "expires_at"),)
+
+
+class WorkerHeartbeat(Base):
+    __tablename__ = "worker_heartbeats"
+    kind: Mapped[str] = mapped_column(String(32), primary_key=True)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -28,7 +28,6 @@ from pai.domains.goals.service import (
     LIFECYCLE_DRAFT,
     LIFECYCLE_PAUSED,
     INTEL_STALE,
-    VAULT_FIELDS_THAT_AFFECT_GOALS,
 )
 from pai.domains.goals.models import Goal
 
@@ -221,16 +220,10 @@ async def test_activate_goal_pauses_others(mock_session, person_id):
 # ── Vault→Goals selective refresh mapping ────────────────────────────────────
 
 
-def test_vault_fields_affect_admission_goals():
-    assert "admission" in VAULT_FIELDS_THAT_AFFECT_GOALS.get("application.test_scores", [])
-
-
-def test_vault_fields_ielts_not_in_map():
-    """IELTS is a Vault key — it routes via test_scores, not ielts itself."""
-    assert "ielts" not in VAULT_FIELDS_THAT_AFFECT_GOALS
-
-
-# ── goal_fact_lines — counselor-facing current/previous/secondary lines ──────
+def test_recorded_dependency_matches_changed_field():
+    from pai.domains.goals.dependencies import affects
+    assert affects(["application.test_scores"], "application.test_scores")
+    assert not affects(["skills"], "application.test_scores")
 
 
 def _row(title, lifecycle_status, goal_type="admission"):

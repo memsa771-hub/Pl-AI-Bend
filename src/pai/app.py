@@ -154,6 +154,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(
             status_code=exc.status_code,
             content=error(exc.code, exc.message),
+            headers={"Retry-After": str(getattr(exc, "retry_after", 5))} if exc.status_code in {429, 503} else None,
         )
 
     @app.exception_handler(RequestValidationError)
@@ -193,13 +194,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     async def health_ready(request: Request) -> JSONResponse:
         provider: SupabaseAuthProvider = request.app.state.auth_provider
-        ok = await provider.health_check()
-        if not ok:
-            return JSONResponse(
-                status_code=503,
-                content=error("NOT_READY", "Authentication provider is not reachable."),
-            )
-        return JSONResponse(content=success({"status": "ready"}))
+        from pai.platform.operations import readiness
+        checks = await readiness(app_settings, provider)
+        return JSONResponse(status_code=200 if all(checks.values()) else 503,
+                            content=success({"status": "ready" if all(checks.values()) else "not_ready", "checks": checks}))
+
+    from pai.platform.request_limits import RequestLimitsMiddleware
+    app.add_middleware(RequestLimitsMiddleware, settings=app_settings)
 
     app.add_middleware(LatencyMiddleware)
     include_routers(app)

@@ -27,6 +27,8 @@ from pai.domains.student.person.typed_resources import (
 from pai.domains.student.normalization.phone import normalize_phone
 from pai.interfaces.api.schemas import success
 
+from pai.domains.student.person.qualifications import Qualification
+
 router = APIRouter(prefix="/api/v1/person", tags=["person"])
 
 
@@ -52,7 +54,7 @@ class EducationCreate(BaseModel):
     status: str | None = None
     gpa: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     gpaScale: float | None = Field(default=None, gt=0, allow_inf_nan=False)
-    qualificationData: dict | None = None
+    qualificationData: Qualification | None = None
 
 
 
@@ -64,7 +66,7 @@ class EducationPatch(BaseModel):
     status: str | None = None
     gpa: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     gpaScale: float | None = Field(default=None, gt=0, allow_inf_nan=False)
-    qualificationData: dict | None = None
+    qualificationData: Qualification | None = None
 
 
 

@@ -116,9 +116,26 @@ class Settings(BaseSettings):
     embedding_dimensions: int = Field(default=1536, alias="EMBEDDING_DIMENSIONS")
     # Rows pulled by vector search before structural re-ranking in Python.
     embedding_candidate_limit: int = Field(default=40, alias="EMBEDDING_CANDIDATE_LIMIT")
-    embedding_timeout_seconds: float = Field(default=15.0, alias="EMBEDDING_TIMEOUT_SECONDS")
+    embedding_timeout_seconds: float = Field(default=0.6, gt=0, alias="EMBEDDING_TIMEOUT_SECONDS")
+    memory_recall_budget_seconds: float = Field(default=0.9, gt=0, le=2, alias="MEMORY_RECALL_BUDGET_SECONDS")
+    turn_understanding_budget_seconds: float = Field(default=1.2, gt=0, le=2, alias="TURN_UNDERSTANDING_BUDGET_SECONDS")
+    memory_rerank_url: str = Field(default="", alias="MEMORY_RERANK_URL")
+    memory_rerank_api_key: str = Field(default="", alias="MEMORY_RERANK_API_KEY")
+    memory_rerank_model: str = Field(default="", alias="MEMORY_RERANK_MODEL")
+    memory_rerank_budget_seconds: float = Field(default=0.2, gt=0, le=1, alias="MEMORY_RERANK_BUDGET_SECONDS")
     # Postgres LangGraph checkpoints add remote writes per node — off by default for chat latency
     enable_graph_checkpoint: bool = Field(default=False, alias="ENABLE_GRAPH_CHECKPOINT")
+
+    enable_rate_limits: bool = Field(default=True, alias="ENABLE_RATE_LIMITS")
+    request_limit_per_minute: int = Field(default=120, gt=0, alias="REQUEST_LIMIT_PER_MINUTE")
+    user_request_limit_per_minute: int = Field(default=60, gt=0, alias="USER_REQUEST_LIMIT_PER_MINUTE")
+    upload_limit_per_day: int = Field(default=30, gt=0, alias="UPLOAD_LIMIT_PER_DAY")
+    llm_call_limit_per_day: int = Field(default=300, gt=0, alias="LLM_CALL_LIMIT_PER_DAY")
+    llm_token_limit_per_day: int = Field(default=1000000, gt=0, alias="LLM_TOKEN_LIMIT_PER_DAY")
+    llm_global_token_limit_per_day: int = Field(default=10000000, gt=0, alias="LLM_GLOBAL_TOKEN_LIMIT_PER_DAY")
+    readiness_timeout_seconds: float = Field(default=3, gt=0, alias="READINESS_TIMEOUT_SECONDS")
+    worker_heartbeat_max_age_seconds: int = Field(default=600, gt=0, alias="WORKER_HEARTBEAT_MAX_AGE_SECONDS")
+    worker_queue_max_age_seconds: int = Field(default=900, gt=0, alias="WORKER_QUEUE_MAX_AGE_SECONDS")
 
     @field_validator(
         "supabase_anon_key",

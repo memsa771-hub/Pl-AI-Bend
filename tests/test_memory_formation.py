@@ -99,7 +99,7 @@ def test_hypothetical_stays_candidate():
     )
     drafts = drafts_from_turn(observed=[maybe])
     assert drafts[0].status == "candidate"
-    assert importance_of(maybe) < 0.5
+    assert importance_of(maybe) == 0.5
 
 
 def test_conflict_does_not_share_live_semantic_key():

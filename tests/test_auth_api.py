@@ -389,4 +389,5 @@ def test_health_endpoints(client):
     live = client.get("/health/live")
     assert live.status_code == 200
     ready = client.get("/health/ready")
-    assert ready.status_code == 200
+    assert ready.status_code == 503
+    assert ready.json()["data"]["checks"]["auth"] is True

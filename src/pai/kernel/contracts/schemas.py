@@ -23,6 +23,7 @@ class VaultCandidate(BaseModel):
     field_key: str
     value: Any
     confidence: float = Field(ge=0.0, le=1.0)
+    contextual_importance: float | None = Field(default=None, ge=0, le=1, description="Importance to the student in the supplied context; not a field-type priority.")
     explicitness: Explicitness = "explicit"
     assertion_status: AssertionStatus = "explicit"
     attributed_to: str | None = None

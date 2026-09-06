@@ -57,6 +57,8 @@ def _counselor_web_note(allow_web: bool, attachment_note: str = "") -> str:
     parts: list[str] = []
     if allow_web:
         parts.append("LIVE WEB is available via the web_search tool this turn.")
+    else:
+        parts.append("No live research was performed this turn. Do not claim current deadlines, prices or eligibility are verified; clarify what needs checking.")
     extra = (attachment_note or "").strip()
     if extra:
         parts.append(extra)
@@ -172,21 +174,34 @@ class PAIOrchestrator:
             if is_greeting(state["user_message"]) or not self._memory
             else self._memory.recall(state["user_message"])
         )
-        pack_task = build_counselor_context(
-            self._session,
-            self._person,
-            conversation_id=uuid.UUID(state["conversation_id"]),
-            settings=self._settings,
-            message=state["user_message"],
-        )
-        pack, semantic = await asyncio.gather(
-            timed("context")(lambda: pack_task)(),
-            timed("semantic_recall")(lambda: recall)(),
-        )
-        from pai.intelligences.understanding.turn import understand_turn
-        understanding = await understand_turn(self._gateway, message=state["user_message"],
-            recent=pack.recent_messages, profile=pack.profile_block(),
-            candidates=pack.discovery_candidates)
+        async def bounded_recall() -> str:
+            try:
+                async with asyncio.timeout(self._settings.memory_recall_budget_seconds):
+                    return await timed("semantic_recall")(lambda: recall)()
+            except Exception:
+                logger.info("Memory recall unavailable within chat budget")
+                return ""
+
+        memory_task = asyncio.create_task(bounded_recall())
+        try:
+            # Context and recall start together; understanding never waits on recall.
+            pack = await timed("context")(lambda: build_counselor_context(
+                self._session, self._person,
+                conversation_id=uuid.UUID(state["conversation_id"]),
+                settings=self._settings, message=state["user_message"],
+            ))()
+            from pai.intelligences.understanding.turn import understand_turn
+            understanding = await understand_turn(
+                self._gateway, message=state["user_message"],
+                recent=pack.recent_messages, profile=pack.profile_block(),
+                candidates=pack.discovery_candidates,
+                timeout_seconds=self._settings.turn_understanding_budget_seconds,
+            )
+            semantic = await memory_task
+        finally:
+            if not memory_task.done():
+                memory_task.cancel()
+            await asyncio.gather(memory_task, return_exceptions=True)
         state["turn_understanding"] = understanding
         state["task_proposals"] = understanding.task_proposals
         state["orchestration_llm_calls"] = (state.get("orchestration_llm_calls") or 0) + 1

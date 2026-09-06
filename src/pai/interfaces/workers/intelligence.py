@@ -30,7 +30,7 @@ async def run_intelligence_worker_once(settings: Settings | None = None) -> bool
             return True
         job_id, attempt, person_id = job.id, job.attempts, job.person_id
         payload = job.payload or {}
-        gateway = LLMGateway(settings)
+        gateway = LLMGateway(settings, subject=str(job.person_id))
         try:
             from pai.platform.jobs.lease import pin_lease
             if not await pin_lease(session, job):
@@ -65,6 +65,8 @@ async def run_intelligence_worker_once(settings: Settings | None = None) -> bool
 async def intelligence_worker_loop(settings: Settings, stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
         try:
+            from pai.platform.operations import heartbeat
+            await heartbeat(settings, "intelligence")
             processed = await run_intelligence_worker_once(settings)
             if not processed:
                 await asyncio.sleep(1.0)

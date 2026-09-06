@@ -36,7 +36,7 @@ class PersonMemoryService:
         self._person_id = person_id
         self._session_factory = session_factory
         self._async_store = (
-            AsyncPostgresMemoryStore(session_factory, person_id) if session_factory else None
+            AsyncPostgresMemoryStore(session_factory, person_id, settings) if session_factory else None
         )
         # AgentSpan SemanticMemory always gets a sync store for API compatibility;
         # production reads/writes prefer the async Postgres path when available.

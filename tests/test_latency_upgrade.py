@@ -23,7 +23,7 @@ from pai.platform.latency import LatencyMiddleware, request_id
 )
 async def test_normal_turns_never_call_tool_decision(test_settings, message, research):
     settings = test_settings.model_copy(update={"tavily_api_key": "test"})
-    enabled = counselor_web_search_enabled(settings, message, understanding=SimpleNamespace(needs_research=research))
+    enabled = counselor_web_search_enabled(settings, message, understanding=SimpleNamespace(research_state="required" if research else "not_required"))
     assert enabled is research
     if research:
         return

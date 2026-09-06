@@ -113,3 +113,5 @@ current_goal: kind, stated, intent, mode, supersedes_previous, evidence_text, go
 goal_type (when kind=life_aim): admission | job | internship | general. Classify meaning,
 not English keywords (study/degree/university → admission; paid work → job;
 internship → internship; otherwise general).
+
+When evidence supports it, assign contextual_importance (0..1) from the student's current decision and stated priorities. Do not derive importance from a field name or country. Leave null when unclear.

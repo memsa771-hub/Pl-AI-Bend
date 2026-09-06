@@ -19,6 +19,7 @@ from pai.domains.student.person.models import (
 
 
 def _edu_dict(row: Education) -> dict[str, Any]:
+    from pai.domains.student.person.qualifications import qualification_metadata
     return {
         "id": str(row.id),
         "institution": row.institution,
@@ -27,7 +28,7 @@ def _edu_dict(row: Education) -> dict[str, Any]:
         "graduationYear": row.graduation_year,
         "gpa": row.gpa,
         "gpaScale": row.gpa_scale,
-        "qualification": row.qualification_data or {},
+        "qualification": qualification_metadata(row.qualification_data, degree=row.degree, field=row.major),
         "percentage": row.percentage,
         "status": row.status,
         "startDate": row.start_date.isoformat() if row.start_date else None,

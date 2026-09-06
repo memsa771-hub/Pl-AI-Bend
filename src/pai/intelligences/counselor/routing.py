@@ -19,9 +19,7 @@ def counseling_reply_max_tokens(message: str, default: int) -> int:
 def counselor_web_search_enabled(settings: Settings, message: str | None = None,
                                  understanding=None) -> bool:
     available = bool(settings.enable_counselor_tools and (settings.tavily_api_key or "").strip())
-    need = getattr(understanding, "needs_research", None)
-    # Unknown must not silently deny the counselor access to evidence.
-    return available and need is not False
+    return available and getattr(understanding, "research_state", "unknown") == "required"
 
 def counseling_task(message: str) -> str:
     return "student_conversation"

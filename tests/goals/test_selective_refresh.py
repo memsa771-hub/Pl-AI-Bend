@@ -14,7 +14,6 @@ import pytest
 
 from pai.domains.goals.service import (
     INTEL_STALE,
-    VAULT_FIELDS_THAT_AFFECT_GOALS,
     mark_intelligence_stale_for_vault_update,
 )
 from pai.domains.goals.models import Goal
@@ -43,7 +42,7 @@ async def test_test_score_update_marks_admission_stale():
     result_mock.scalars.return_value = MagicMock()
     result_mock.scalars.return_value.all.return_value = [admission_goal]
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=result_mock)
+    session.execute = AsyncMock(side_effect=[result_mock, MagicMock()])
     session.add = MagicMock()
 
     with patch(
@@ -66,7 +65,7 @@ async def test_every_accepted_field_can_invalidate_goal_assessment():
     result = MagicMock()
     result.scalars.return_value.all.return_value = [goal]
     session = AsyncMock()
-    session.execute.return_value = result
+    session.execute.side_effect = [result, MagicMock()]
     with patch("pai.domains.goals.service.enqueue_goal_intelligence_job", new=AsyncMock()) as enqueue:
         affected = await mark_intelligence_stale_for_vault_update(session, goal.person_id, "preferences.preferred_language")
     assert affected == [goal]
@@ -87,7 +86,7 @@ async def test_two_goals_only_affected_one_refreshed():
     result_mock.scalars.return_value = MagicMock()
     result_mock.scalars.return_value.all.return_value = [admission_goal]
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=result_mock)
+    session.execute = AsyncMock(side_effect=[result_mock, MagicMock()])
 
     with patch(
         "pai.domains.goals.service.enqueue_goal_intelligence_job",
@@ -103,8 +102,6 @@ async def test_two_goals_only_affected_one_refreshed():
     assert mock_enqueue.await_count == 1
 
 
-def test_vault_field_map_completeness():
-    """Spot-check that key Vault fields are in the map."""
-    assert "application.test_scores" in VAULT_FIELDS_THAT_AFFECT_GOALS
-    assert "education.highest_level" in VAULT_FIELDS_THAT_AFFECT_GOALS
-    assert "demographics.nationality" in VAULT_FIELDS_THAT_AFFECT_GOALS
+def test_dependency_manifest_records_actual_inputs():
+    from pai.domains.goals.dependencies import recorded_dependencies
+    assert recorded_dependencies({"skills": [{"id": "s1"}]}) == ["skills", "skills:s1"]

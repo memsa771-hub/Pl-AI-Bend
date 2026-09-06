@@ -94,21 +94,9 @@ def memory_key_for(candidate: VaultCandidate) -> str:
 
 
 def importance_of(candidate: VaultCandidate) -> float:
-    key = candidate.field_key or ""
-    status = assertion_of(candidate)
-    if status == "hypothetical":
-        return 0.32
-    if key.startswith("identity.") or key == "education.highest_level":
-        return 0.95
-    if key.startswith(("application.", "finance.")) or key == "mobility.preferred_regions":
-        return 0.88 if status != "uncertain" else 0.55
-    if key.startswith("education.") or key.startswith("career."):
-        return 0.82
-    if status == "negated":
-        return 0.72
-    if not is_vault_eligible(candidate):
-        return 0.42
-    return 0.55
+    # Contextual importance is supplied by semantic extraction, never field names.
+    return candidate.contextual_importance if candidate.contextual_importance is not None else 0.5
+
 
 
 def drafts_from_turn(
@@ -244,7 +232,7 @@ def rank_score(
     """
     if record.status == "superseded":
         return -1.0
-    if record.importance < 0.15 or record.status == "ephemeral":
+    if record.status == "ephemeral":
         return -1.0
     semantic = semantic_similarity is not None
     if semantic:
@@ -263,36 +251,9 @@ def rank_score(
         )
         if relevance <= 0:
             return -1.0
-    recency = _recency(record.last_confirmed_at, now)
-    structure = (
-        0.55 * record.importance
-        + 0.25 * record.stability
-        + 0.12 * recency
-        + 0.08 * record.confidence
-    )
-    if semantic:
-        # Cosine similarities sit in a narrow band (~0.28-0.48 in practice), so
-        # the lexical weights let importance out-vote relevance: the single
-        # highest-importance memory won every query regardless of what was
-        # asked. The caller normalises similarity across the candidate set;
-        # relevance leads and structure breaks ties between close matches.
-        score = _SEMANTIC_RELEVANCE_WEIGHT * relevance + (
-            1.0 - _SEMANTIC_RELEVANCE_WEIGHT
-        ) * structure
-    else:
-        # Jaccard spreads much wider, so the original balance still holds.
-        score = (
-            0.40 * relevance
-            + 0.25 * record.importance
-            + 0.20 * record.stability
-            + 0.10 * recency
-            + 0.05 * record.confidence
-        )
-    # An unverified claim must never outrank the Vault-backed fact it contradicts.
-    # It stays recallable (the counselor should ask about it) but ranks below
-    # settled truth competing for the same recall slots.
-    if is_unverified_claim(record):
-        score *= _CLAIM_RANK_PENALTY
+    # Meaning determines relevance. Confidence/status are truth labels, not
+    # a manually weighted substitute for relevance to the present question.
+    score = relevance
     return score
 
 

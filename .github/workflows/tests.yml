@@ -1,0 +1,45 @@
+name: CI
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: pai_test
+          POSTGRES_PASSWORD: pai_test
+          POSTGRES_DB: pai_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U pai_test -d pai_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://pai_test:pai_test@localhost:5432/pai_test
+      TEST_DATABASE_URL: postgresql+asyncpg://pai_test:pai_test@localhost:5432/pai_test
+      RUN_LIVE_DEEPSEEK: "0"
+      APP_ENV: test
+      RUN_WORKERS_IN_API: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: cp .env.example .env
+      - run: uv sync --locked --all-extras
+      - name: Ruff correctness checks
+        run: uv run ruff check src --select F821,F822,F823,F811,F841
+      - name: Migration smoke
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade 015_native_qualifications
+          uv run alembic upgrade head
+      - name: Import and startup smoke
+        run: uv run python scripts/startup_smoke.py
+      - name: Offline suite (no live LLM calls)
+        run: uv run pytest -q
+      - name: Build wheel and source distribution
+        run: uv build

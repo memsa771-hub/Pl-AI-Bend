@@ -78,12 +78,13 @@ async def run_document_worker_once(settings: Settings | None = None) -> bool:
     settings = settings or get_settings()
     factory = get_session_factory(settings)
     storage = SupabaseStorageProvider(settings)
-    gateway = LLMGateway(settings)
+    gateway = None
     try:
         async with factory() as session:
             job = await claim_next_job(session)
             if job is None:
                 return False
+            gateway = LLMGateway(settings, subject=str(job.person_id))
             job_id, attempt = job.id, job.attempts
             try:
                 from pai.platform.jobs.lease import pin_lease
@@ -102,13 +103,16 @@ async def run_document_worker_once(settings: Settings | None = None) -> bool:
                     await session.commit()
         return True
     finally:
-        await gateway.aclose()
+        if gateway is not None:
+            await gateway.aclose()
         await storage.aclose()
 
 
 async def document_worker_loop(settings: Settings, stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
         try:
+            from pai.platform.operations import heartbeat
+            await heartbeat(settings, "documents")
             processed = await run_document_worker_once(settings)
             if not processed:
                 await asyncio.sleep(2.0)

@@ -31,7 +31,9 @@ class AsyncPostgresMemoryStore:
         self,
         session_factory: async_sessionmaker[AsyncSession],
         person_id: uuid.UUID,
+        settings=None,
     ) -> None:
+        self._settings = settings
         self._session_factory = session_factory
         self._person_id = person_id
 
@@ -57,12 +59,14 @@ class AsyncPostgresMemoryStore:
     async def search(self, query: str, top_k: int = 5, *, mode: str = "fast") -> list[MemoryEntry]:
         from pai.config import get_settings
 
-        settings = get_settings()
+        settings = self._settings or get_settings()
         scored_rows = await self._vector_candidates(query, settings)
         if scored_rows is not None:
             # Vector search narrowed by meaning; structural signals
             # (importance / stability / recency / claim penalty) still decide order.
-            return _rank_entries(query, scored_rows, top_k, mode=mode, semantic=True)
+            entries = _rank_entries(query, scored_rows, settings.embedding_candidate_limit, mode=mode, semantic=True)
+            from pai.domains.memory.rerank import rerank
+            return await rerank(query, entries, top_k, settings)
         # Cap rows before Python ranking — full-table load does not scale.
         scan_limit = max(top_k, settings.semantic_memory_scan_limit)
         async with self._session_factory() as session:
@@ -227,34 +231,9 @@ def _rank_entries(
     """
     from pai.domains.memory.formation import format_for_recall, rank_score, record_from_row
 
-    # Cosine similarities for one query sit in a narrow band, and the absolute
-    # value carries little meaning — what matters is which of these candidates
-    # is closest. Stretch the set across a floor..1.0 window so relevance can
-    # separate them; without this the spread is too small to outweigh
-    # importance.
-    #
-    # The floor matters: a plain min-max pins the worst candidate at exactly 0,
-    # and with a single candidate (or near-identical similarities) it would pin
-    # *every* candidate at 0 — scoring a strong match as irrelevant and handing
-    # the ordering back to importance, which is the bug this rescale exists to
-    # prevent.
-    span_lo = span = 0.0
-    if semantic and rows:
-        sims = [sim for _row, sim in rows]
-        span_lo = min(sims)
-        # A zero spread means every candidate is equally relevant, so they all
-        # land on the floor and structure decides — which is the right answer,
-        # not a case to skip. Skipping would pass raw ~0.4 similarities through
-        # and hand ordering back to importance.
-        span = (max(sims) - span_lo) or 1.0
-
     scored: list[tuple[float, MemoryEntry]] = []
     for item in rows:
         row, similarity = item if semantic else (item, None)
-        if semantic:
-            similarity = _RESCALE_FLOOR + (1.0 - _RESCALE_FLOOR) * (
-                (similarity - span_lo) / span
-            )
         record = record_from_row(row)
         score = rank_score(query, record, semantic_similarity=similarity)
         if score <= 0:

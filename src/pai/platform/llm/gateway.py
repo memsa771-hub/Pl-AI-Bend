@@ -14,7 +14,8 @@ from pai.platform.llm.schemas import LLMMessage, LLMRequest, LLMResponse
 
 
 class LLMGateway:
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, settings: Settings | None = None, *, subject: str | None = None) -> None:
+        self._subject = subject
         self._settings = settings or get_settings()
         self._providers: dict[str, LLMProvider] = {}
         if self._settings.deepseek_api_key:
@@ -65,12 +66,15 @@ class LLMGateway:
             reasoning = "none"
         elif task in ("goal_intelligence", "complex_analysis"):
             reasoning = self._settings.llm_goal_reasoning
+        if task == "turn_understanding":
+            reasoning = "none"
         return {
             "reasoning_effort": reasoning,
             "verbosity": "low" if counseling else None,
             "prompt_cache_key": f"pai:{task}:v1",
             "timeout_seconds": (self._settings.llm_counseling_timeout_seconds
-                                if counseling else self._settings.llm_timeout_seconds),
+                                if counseling else (self._settings.turn_understanding_budget_seconds
+                                if task == "turn_understanding" else self._settings.llm_timeout_seconds)),
         }
 
     def _max_tokens_for(self, task: str) -> int:
@@ -101,6 +105,8 @@ class LLMGateway:
             tool_choice=tool_choice,
             max_tokens=max_tokens or self._max_tokens_for(task),
         )
+        from pai.platform.limits import reserve_llm
+        await reserve_llm(self._settings, request, subject=self._subject)
         with span("llm_total", task=task, model=request.model):
             if output_schema is not None:
                 return await provider.generate_structured(request, output_schema)
@@ -126,6 +132,8 @@ class LLMGateway:
             tool_choice=tool_choice,
             max_tokens=max_tokens or self._max_tokens_for(task),
         )
+        from pai.platform.limits import reserve_llm
+        await reserve_llm(self._settings, request, subject=self._subject)
         stream_fn = getattr(provider, "stream", None)
         if stream_fn is None:
             out = await provider.generate(request)

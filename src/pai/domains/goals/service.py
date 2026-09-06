@@ -38,27 +38,6 @@ INTEL_PARTIAL = "partial"
 INTEL_FAILED = "failed"
 INTEL_STALE = "stale"
 
-# Vault fields that, when updated, may invalidate goal assessment
-VAULT_FIELDS_THAT_AFFECT_GOALS: dict[str, list[str]] = {
-    # field_key → which goal_types it affects
-    "application.test_scores": ["admission"],
-    "education.highest_level": ["admission"],
-    "education.records": ["admission"],
-    "application.study_country": ["admission"],
-    "application.target_universities": ["admission"],
-    "identity.current_status": ["admission", "job", "internship"],
-    "finance.funding_status": ["admission"],
-    "finance.scholarship_interest": ["admission"],
-    "demographics.nationality": ["admission", "job", "internship"],
-    "location.current_country": ["admission", "job", "internship"],
-    # Gap-closing profile facts (live test: these were missing → gaps never refreshed)
-    "career.work_history": ["admission", "job", "internship"],
-    "career.projects": ["admission", "job", "internship"],
-    "career.certifications": ["admission", "job", "internship"],
-    "career.skills": ["admission", "job", "internship"],
-    "mobility.passport_number": ["admission", "job", "internship"],
-}
-
 # Fields that must NOT appear on a Goal row (Vault-level only)
 _VAULT_ONLY_KEYS = frozenset(
     {
@@ -431,22 +410,31 @@ async def mark_intelligence_stale_for_vault_update(
     When a Vault field changes, mark affected goal summaries stale and re-enqueue.
     Returns goals that were touched.
     """
-    affected_types = [kind.value for kind in GoalType]
 
     result = await session.execute(
         select(Goal).where(
             Goal.person_id == person_id,
-            Goal.goal_type.in_(affected_types),
             Goal.lifecycle_status != LIFECYCLE_ARCHIVED,
         )
     )
     goals = list(result.scalars().all())
+    from pai.domains.goals.dependencies import affects
+    intelligence = await session.execute(
+        select(GoalIntelligence).where(GoalIntelligence.person_id == person_id)
+    )
+    manifests = {row.goal_id: (row.freshness or {}).get("dependencies")
+                 for row in intelligence.scalars().all()}
+    touched = []
     for goal in goals:
+        if not affects(manifests.get(goal.id), vault_field_key):
+            continue
         goal.intelligence_status = INTEL_STALE
         await enqueue_goal_intelligence_job(
             session, goal, kind="assessment_refresh", force=False
         )
-    return goals
+        touched.append(goal)
+    return touched
+
 
 
 def goal_to_public(goal: Goal | None) -> dict[str, Any] | None:

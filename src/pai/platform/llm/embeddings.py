@@ -48,55 +48,43 @@ class OpenAIEmbeddingProvider:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
         self.dimensions = self._settings.embedding_dimensions
-        self._client = None
-        self._failed = False
-        self._lock = asyncio.Lock()
         # Cheap running totals so spend is visible without a metrics backend.
         self.calls = 0
         self.tokens = 0
-
-    async def _ensure_client(self):
-        if self._client is not None or self._failed:
-            return self._client
-        async with self._lock:
-            if self._client is not None or self._failed:
-                return self._client
-            key = (self._settings.openai_api_key or "").strip()
-            if not key:
-                self._failed = True
-                _warn_once("OPENAI_API_KEY is not set")
-                return None
-            try:
-                from openai import AsyncOpenAI
-
-                self._client = AsyncOpenAI(
-                    api_key=key,
-                    base_url=self._settings.openai_base_url or None,
-                    timeout=self._settings.embedding_timeout_seconds,
-                )
-            except Exception:
-                self._failed = True
-                logger.exception("Embedding client unavailable")
-        return self._client
 
     async def embed(self, texts: list[str]) -> list[list[float]] | None:
         clean = [(t or "").strip() for t in texts]
         if not any(clean):
             return None
-        client = await self._ensure_client()
-        if client is None:
+        key = (self._settings.openai_api_key or "").strip()
+        if not key:
+            _warn_once("OPENAI_API_KEY is not set")
             return None
         started = time.perf_counter()
         try:
-            response = await client.embeddings.create(
-                model=self._settings.embedding_model,
-                input=clean,
-                dimensions=self.dimensions,
-            )
+            from pai.platform.limits import consume, usage_subject
+            await consume(self._settings, [
+                ("llm_global", "all", sum(len(t.encode()) for t in clean),
+                 self._settings.llm_global_token_limit_per_day, 86400),
+                ("llm_tokens", usage_subject.get(), sum(len(t.encode()) for t in clean),
+                 self._settings.llm_token_limit_per_day, 86400)])
+            import httpx
+            async with asyncio.timeout(self._settings.embedding_timeout_seconds):
+                async with httpx.AsyncClient(timeout=self._settings.embedding_timeout_seconds) as client:
+                    response = await client.post(
+                        self._settings.openai_base_url.rstrip("/") + "/embeddings",
+                        headers={"Authorization": f"Bearer {key}"},
+                        json={"model": self._settings.embedding_model, "input": clean,
+                              "dimensions": self.dimensions},
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
             # The API preserves input order, but index is authoritative.
-            ordered = sorted(response.data, key=lambda d: d.index)
-            vectors = [list(d.embedding) for d in ordered]
-            tokens = getattr(getattr(response, "usage", None), "total_tokens", 0) or 0
+            ordered = sorted(payload["data"], key=lambda d: d["index"])
+            if [d["index"] for d in ordered] != list(range(len(clean))):
+                raise ValueError("Incomplete embedding response")
+            vectors = [[float(v) for v in d["embedding"]] for d in ordered]
+            tokens = (payload.get("usage") or {}).get("total_tokens", 0) or 0
             self.calls += 1
             self.tokens += tokens
             # One line per call: enough to see spend and latency in the logs
@@ -114,7 +102,8 @@ class OpenAIEmbeddingProvider:
             return None
         # A vector of the wrong width cannot be stored in vector(N) and would
         # fail per-row at write time. Refuse the whole batch loudly instead.
-        bad = next((v for v in vectors if len(v) != self.dimensions), None)
+        import math
+        bad = next((v for v in vectors if len(v) != self.dimensions or not all(math.isfinite(x) for x in v)), None)
         if bad is not None:
             logger.error(
                 "Embedding dimension mismatch: model %s returned %s, EMBEDDING_DIMENSIONS "

@@ -44,7 +44,8 @@ def _education_payload(value: Any) -> dict[str, Any] | None:
         text = value.strip()
         if not text:
             return None
-        return {"degree": text}
+        from pai.domains.student.person.qualifications import qualification_metadata
+        return {"degree": text, "qualification_data": qualification_metadata({}, degree=text)}
 
     if not isinstance(value, dict):
         return None
@@ -55,6 +56,8 @@ def _education_payload(value: Any) -> dict[str, Any] | None:
     institution = value.get("institution")
     degree = value.get("degree") or value.get("program") or value.get("qualification")
     major = value.get("major") or value.get("stream") or value.get("group")
+    from pai.domains.student.person.qualifications import qualification_metadata
+    out["qualification_data"] = qualification_metadata(value, degree=degree, field=major)
 
     if institution and str(institution).strip():
         out["institution"] = str(institution).strip()

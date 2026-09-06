@@ -71,29 +71,9 @@ async def claim_next_goal_job(session: AsyncSession) -> GoalJob | None:
 
 def _build_vault_snapshot(person_records: dict) -> dict:
     """Extract counselor-safe profile snapshot for assessment stage."""
-    snap: dict = {}
-    # Keys must match load_typed_profile_records() (camelCase for work).
-    for key in (
-        "educations",
-        "skills",
-        "workExperiences",
-        "projects",
-        "certifications",
-        "goals",
-    ):
-        records = person_records.get(key) or []
-        if records:
-            snap[key] = records[:5]
-    for key in (
-        "application.test_scores", "application.study_country",
-        "finance.funding_status", "demographics.nationality",
-        "location.current_country", "identity.current_status",
-        "education.highest_level",
-    ):
-        val = person_records.get("sparseFields", {}).get(key)
-        if val:
-            snap[key] = val
-    return snap
+    from pai.domains.goals.dependencies import input_snapshot
+    return input_snapshot(person_records)
+
 
 
 async def _load_goal_and_intel(
@@ -266,6 +246,10 @@ async def process_goal_job(
         job.locked_at = None
         job.attempts = 0
         return
+    from pai.domains.goals.dependencies import recorded_dependencies
+    result["freshness"] = {**(result.get("freshness") or {}),
+                           "dependencies": recorded_dependencies(vault_snapshot),
+                           "profile_version": profile_version}
     await _save_intelligence(session, goal, intel, result)
     job.status = "completed"
     job.locked_at = None
@@ -279,7 +263,7 @@ async def run_goal_worker_once(settings: Settings | None = None) -> bool:
         if job is None:
             return False
         job_id, attempt = job.id, job.attempts
-        gateway = LLMGateway(settings)
+        gateway = LLMGateway(settings, subject=str(job.person_id))
         try:
             from pai.platform.jobs.lease import pin_lease
             if not await pin_lease(session, job):
@@ -307,6 +291,8 @@ async def goal_worker_loop(settings: Settings, stop_event: asyncio.Event) -> Non
     """Background poll loop for goal intelligence jobs."""
     while not stop_event.is_set():
         try:
+            from pai.platform.operations import heartbeat
+            await heartbeat(settings, "goals")
             processed = await run_goal_worker_once(settings)
             if not processed:
                 await asyncio.sleep(2.0)

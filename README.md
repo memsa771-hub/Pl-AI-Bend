@@ -130,3 +130,30 @@ Live provider tests are opt-in. No production credentials are needed for unit te
 
 The repository excludes local secrets, virtual environments, caches, generated
 analysis, and response dumps. Only `.env.example` supplies placeholder configuration.
+
+## Realtime and production guards
+
+Chat context and semantic recall start together. Turn Understanding begins as soon
+as context is ready; recall has a 0.9-second deadline and understanding a
+1.2-second deadline. Unknown research decisions stream a cautious response without
+an extra tool-selection call. Embeddings use the existing HTTP dependency.
+
+Apply `uv run alembic upgrade head` before deploying this revision, then restart
+the API and all enabled worker processes. Migration 016 creates the shared usage
+counters and worker heartbeats. `/health/ready` checks Auth, PostgreSQL, the exact
+schema revision, enabled worker progress and queue age; `/health/live` is independent.
+Use liveness for process restarts and readiness for traffic admission.
+
+Rate limits use PostgreSQL atomic counters across replicas. Configure request,
+per-user upload, LLM call and token reservation limits in `.env.example`. Failed
+model requests keep their reservations to bound retries; these counters are
+conservative reservations, not provider billing totals. The peer address is used
+for anonymous rate limits: configure trusted proxy handling at the ASGI server,
+and never trust arbitrary forwarded headers. Test environments disable counters.
+
+Goal analysis freshness records supplied input keys and row IDs. Legacy results
+without an input manifest are invalidated conservatively. Empty inputs are recorded
+so newly supplied facts invalidate assessments too. Memory uses vector relevance;
+an optional configured rerank endpoint can refine the candidates within a short
+sub-budget. It receives the selected memory text, so configure only an approved
+provider. Without it, vector ranking works directly.

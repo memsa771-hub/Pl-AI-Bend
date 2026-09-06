@@ -69,11 +69,19 @@ async def get_current_access_token(
 
 
 async def get_validated_access_token(
+    request: Request,
     token: Annotated[str, Depends(get_current_access_token)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> str:
     with span("auth"):
-        validate_access_token(token, settings)
+        payload = validate_access_token(token, settings)
+    from pai.platform.limits import consume, usage_subject
+    subject = str(payload["sub"])
+    usage_subject.set(subject)
+    reservations = [("user_requests", subject, 1, settings.user_request_limit_per_minute, 60)]
+    if request.method == "POST" and "multipart/form-data" in request.headers.get("content-type", ""):
+        reservations.append(("uploads", subject, 1, settings.upload_limit_per_day, 86400))
+    await consume(settings, reservations)
     return token
 
 
@@ -98,7 +106,10 @@ async def resolve_person_from_token(
         payload = validate_access_token(token, settings)
     external_id = str(payload["sub"])
     with span("person_lookup"):
-        return await get_person_by_auth(session, external_id)
+        person = await get_person_by_auth(session, external_id)
+    from pai.platform.limits import usage_subject
+    usage_subject.set(str(person.id))
+    return person
 
 
 async def require_onboarding_complete(
