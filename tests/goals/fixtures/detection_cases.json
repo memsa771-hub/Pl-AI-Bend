@@ -1,0 +1,68 @@
+[
+  {
+    "message": "I want to do MS CS in Germany",
+    "expect": "create",
+    "type": "admission"
+  },
+  {
+    "message": "what is life like in Germany?",
+    "expect": "none"
+  },
+  {
+    "message": "should I take IELTS first or passport first?",
+    "expect": "none"
+  },
+  {
+    "message": "my CGPA is 3.4",
+    "expect": "none"
+  },
+  {
+    "message": "looking for a SWE internship in Dubai",
+    "expect": "create",
+    "type": "internship"
+  },
+  {
+    "message": "actually thinking about China too for MS",
+    "expect": "create_secondary"
+  },
+  {
+    "message": "I got 7.5 in IELTS",
+    "expect": "none"
+  },
+  {
+    "message": "Can I apply for MS in Canada?",
+    "expect": "none"
+  },
+  {
+    "message": "I am applying for a full-time SWE job at Google",
+    "expect": "create",
+    "type": "job"
+  },
+  {
+    "message": "What do I need for PhD in Sweden?",
+    "expect": "none"
+  },
+  {
+    "message": "I want a PhD in AI from Sweden",
+    "expect": "create",
+    "type": "admission"
+  },
+  {
+    "message": "hello",
+    "expect": "none"
+  },
+  {
+    "message": "What is my next step?",
+    "expect": "none"
+  },
+  {
+    "message": "I want to do MS abroad",
+    "expect": "create",
+    "type": "admission"
+  },
+  {
+    "message": "I am pursuing a full-time role in data science in the UK",
+    "expect": "create",
+    "type": "job"
+  }
+]

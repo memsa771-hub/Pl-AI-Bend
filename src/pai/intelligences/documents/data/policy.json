@@ -1,0 +1,161 @@
+{
+  "pipeline_version": "docintel.v1",
+  "classifier_version": "filename.v1",
+  "extractor_version": "typed+omnibus.v1",
+  "normalization_version": "deterministic.v1",
+  "reconciliation_policy_version": "evidence.v1",
+  "min_text_chars": 40,
+  "new_safe_confidence": 0.92,
+  "propose_confidence": 0.7,
+  "critical_relative_delta": 0.15,
+  "passport_expiry_warn_days": 180,
+  "generated_sources": ["ai_generated"],
+  "evidence_ineligible_types": ["sop", "personal_statement", "lor"],
+  "field_criticality": {
+    "education.gpa": "critical",
+    "education.records": "critical",
+    "education.program": "critical",
+    "demographics.date_of_birth": "critical",
+    "mobility.passport_number": "critical",
+    "identity.full_name": "high",
+    "demographics.nationality": "high",
+    "application.test_scores": "high",
+    "career.work_history": "normal",
+    "career.skills": "normal"
+  },
+  "field_sensitivity": {
+    "mobility.passport_number": "highly_sensitive",
+    "demographics.date_of_birth": "sensitive",
+    "identity.national_id": "highly_sensitive",
+    "family.sponsor_contact": "highly_sensitive",
+    "finance.funding_status": "sensitive",
+    "education.gpa": "personal",
+    "career.skills": "personal"
+  },
+  "authority": {
+    "transcript": {
+      "education.gpa": "high",
+      "education.records": "high",
+      "education.program": "high",
+      "education.highest_level": "high",
+      "identity.full_name": "medium",
+      "demographics.date_of_birth": "medium",
+      "*": "none"
+    },
+    "degree_certificate": {
+      "education.records": "high",
+      "education.program": "high",
+      "identity.full_name": "medium",
+      "*": "none"
+    },
+    "passport": {
+      "identity.full_name": "high",
+      "demographics.date_of_birth": "high",
+      "demographics.nationality": "high",
+      "mobility.passport_number": "high",
+      "*": "none"
+    },
+    "national_id": {
+      "identity.full_name": "high",
+      "identity.national_id": "high",
+      "demographics.date_of_birth": "high",
+      "*": "none"
+    },
+    "ielts": {
+      "application.test_scores": "high",
+      "identity.full_name": "medium",
+      "*": "none"
+    },
+    "toefl": {
+      "application.test_scores": "high",
+      "identity.full_name": "medium",
+      "*": "none"
+    },
+    "gre": {
+      "application.test_scores": "high",
+      "identity.full_name": "medium",
+      "*": "none"
+    },
+    "gmat": {
+      "application.test_scores": "high",
+      "identity.full_name": "medium",
+      "*": "none"
+    },
+    "resume": {
+      "career.work_history": "medium",
+      "career.skills": "medium",
+      "career.projects": "medium",
+      "education.records": "medium",
+      "education.program": "medium",
+      "identity.full_name": "medium",
+      "*": "low"
+    },
+    "experience_letter": {
+      "career.work_history": "medium",
+      "*": "none"
+    },
+    "bank_statement": {
+      "finance.funding_status": "medium",
+      "*": "none"
+    },
+    "sponsorship_letter": {
+      "finance.funding_status": "medium",
+      "family.sponsor_contact": "medium",
+      "*": "none"
+    },
+    "sop": { "*": "none" },
+    "personal_statement": { "*": "none" },
+    "lor": { "*": "none" },
+    "visa": {
+      "demographics.nationality": "medium",
+      "mobility.passport_number": "medium",
+      "*": "none"
+    },
+    "other": { "*": "low" }
+  },
+  "identity_fields": [
+    "identity.full_name",
+    "demographics.date_of_birth",
+    "education.records",
+    "education.program"
+  ],
+  "subject_field": "identity.full_name",
+  "identity_case_field": "identity.subject",
+  "unconfirmed_identity": ["ambiguous", "likely_match"],
+  "auto_apply_identity": ["matched"],
+  "typed_confidence": 0.9,
+  "extract_char_limit": 20000,
+  "classify_text_chars": 4000,
+  "max_content_text_chars": 50000,
+  "normalize_ok": 0.95,
+  "normalize_weak": 0.4,
+  "apply_order": ["education.records", "education.gpa"],
+  "comparators": { "education.gpa": "gpa" },
+  "issuer_from": [{ "field": "education.records", "path": "institution" }],
+  "typed_belief": {
+    "education.gpa": {
+      "storage": "educations",
+      "column": "gpa",
+      "scale_column": "gpa_scale",
+      "shape": "cumulative_gpa"
+    }
+  },
+  "normalizers": {
+    "gpa": ["education.gpa"],
+    "date": ["demographics.date_of_birth"],
+    "name": ["identity.full_name", "identity.preferred_name"],
+    "test": ["application.test_scores"]
+  },
+  "processing_stages": {
+    "digitize": "digitizing",
+    "classify": "classifying",
+    "extract": "extracting",
+    "reconcile": "reconciling"
+  },
+  "processing_status_extra": ["uploaded", "queued", "processing"],
+  "criticality_rank": { "low": 0, "normal": 1, "high": 2, "critical": 3 },
+  "block_auto_apply_at": "critical",
+  "readable_qualities": ["good", "unknown"],
+  "low_qualities": ["low"],
+  "unreadable_qualities": ["unreadable"]
+}

@@ -1,0 +1,24 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.tmp_pkgs/
+
+# Local tooling, generated analysis and request/response captures
+.cursor/
+.vscode/
+.idea/
+.fastapicloud/
+graphify-out/
+response.json
+*.log
+.coverage
+htmlcov/

@@ -1,0 +1,72 @@
+{
+  "categories": [
+    "identity",
+    "education",
+    "test",
+    "career",
+    "financial",
+    "application",
+    "immigration",
+    "generated",
+    "other"
+  ],
+  "default_type": "other",
+  "types": {
+    "passport": { "category": "identity", "base_criticality": "high", "trust_level": "student_provided", "extractor": "passport", "party_roles": ["subject", "issuer"] },
+    "national_id": { "category": "identity", "base_criticality": "high", "trust_level": "student_provided", "party_roles": ["subject", "issuer"] },
+    "transcript": { "category": "education", "base_criticality": "critical", "trust_level": "student_provided", "extractor": "transcript", "party_roles": ["subject", "issuer"] },
+    "degree_certificate": { "category": "education", "base_criticality": "high", "trust_level": "student_provided", "extractor": "degree", "party_roles": ["subject", "issuer"] },
+    "enrollment_letter": { "category": "education", "base_criticality": "normal", "trust_level": "student_provided", "party_roles": ["subject", "issuer"] },
+    "ielts": { "category": "test", "base_criticality": "high", "trust_level": "student_provided", "extractor": "test_score", "party_roles": ["subject", "issuer"] },
+    "toefl": { "category": "test", "base_criticality": "high", "trust_level": "student_provided", "extractor": "test_score", "party_roles": ["subject", "issuer"] },
+    "gre": { "category": "test", "base_criticality": "high", "trust_level": "student_provided", "extractor": "test_score", "party_roles": ["subject", "issuer"] },
+    "gmat": { "category": "test", "base_criticality": "high", "trust_level": "student_provided", "extractor": "test_score", "party_roles": ["subject", "issuer"] },
+    "resume": { "category": "career", "base_criticality": "normal", "trust_level": "student_provided", "extractor": "resume", "party_roles": ["subject"] },
+    "experience_letter": { "category": "career", "base_criticality": "normal", "trust_level": "student_provided", "party_roles": ["subject", "issuer"] },
+    "bank_statement": { "category": "financial", "base_criticality": "high", "trust_level": "student_provided", "party_roles": ["owner", "issuer"] },
+    "sponsorship_letter": { "category": "financial", "base_criticality": "high", "trust_level": "student_provided", "party_roles": ["sponsor", "subject"] },
+    "sop": { "category": "application", "base_criticality": "high", "trust_level": "pai_generated", "party_roles": ["subject"] },
+    "personal_statement": { "category": "application", "base_criticality": "high", "trust_level": "pai_generated", "party_roles": ["subject"] },
+    "lor": { "category": "application", "base_criticality": "high", "trust_level": "pai_generated", "party_roles": ["subject", "author"] },
+    "visa": { "category": "immigration", "base_criticality": "high", "trust_level": "student_provided", "party_roles": ["subject", "issuer"] },
+    "residence_permit": { "category": "immigration", "base_criticality": "high", "trust_level": "student_provided", "party_roles": ["subject", "issuer"] },
+    "other": { "category": "other", "base_criticality": "low", "trust_level": "unverified", "party_roles": ["subject"] }
+  },
+  "filename_hints": [
+    { "needles": ["cv", "resume", "curriculum"], "type": "resume" },
+    { "needles": ["transcript", "marksheet", "marks"], "type": "transcript" },
+    { "needles": ["passport"], "type": "passport" },
+    { "needles": ["national id", "cnic", "aadhaar", "nic"], "type": "national_id" },
+    { "needles": ["degree", "diploma", "certificate"], "type": "degree_certificate" },
+    { "needles": ["enrollment", "enrolment"], "type": "enrollment_letter" },
+    { "needles": ["ielts"], "type": "ielts" },
+    { "needles": ["toefl"], "type": "toefl" },
+    { "needles": ["gre"], "type": "gre" },
+    { "needles": ["gmat"], "type": "gmat" },
+    { "needles": ["sop", "statement of purpose"], "type": "sop" },
+    { "needles": ["personal statement"], "type": "personal_statement" },
+    { "needles": ["lor", "letter of recommendation", "recommendation letter"], "type": "lor" },
+    { "needles": ["bank", "statement"], "type": "bank_statement" },
+    { "needles": ["sponsor", "affidavit", "financial"], "type": "sponsorship_letter" },
+    { "needles": ["visa"], "type": "visa" },
+    { "needles": ["residence", "permit"], "type": "residence_permit" },
+    { "needles": ["experience letter", "employment letter"], "type": "experience_letter" }
+  ],
+  "generated_types": ["sop", "personal_statement", "lor"],
+  "upload_mimes": {
+    "application/pdf": [".pdf"],
+    "text/plain": [".txt"],
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+    "image/jpeg": [".jpg", ".jpeg"],
+    "image/png": [".png"]
+  },
+  "native_parse_mimes": [
+    "application/pdf",
+    "text/plain",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ],
+  "ocr_mimes": ["image/jpeg", "image/png", "application/pdf"],
+  "blocked_extensions": [".exe", ".bat", ".cmd", ".sh", ".dll", ".js", ".msi"],
+  "source_types": ["onboarding", "document_vault", "chat_attachment", "ai_generated", "imported", "application"],
+  "created_by": ["student", "pai", "system", "external"]
+}
