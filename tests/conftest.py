@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import os
 
 import pytest
 from jose import jwt
@@ -306,11 +307,13 @@ def postgres_ready(test_settings: Settings) -> Settings:
     try:
         asyncio.run(_ping_db(test_settings))
     except Exception as exc:
+        if os.environ.get("CI"):
+            pytest.fail(f"PostgreSQL unavailable: {exc}")
         pytest.skip(f"PostgreSQL unavailable: {exc}")
     try:
         _run_migrations(test_settings.database_url)
     except Exception as exc:
-        pytest.skip(f"Alembic migrations failed: {exc}")
+        pytest.fail(f"Alembic migrations failed: {exc}")
     return test_settings
 
 

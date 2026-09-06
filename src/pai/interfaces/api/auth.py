@@ -343,16 +343,20 @@ async def delete_account(
     payload = validate_access_token(access_token, settings)
     person = None
     try:
-        person = await get_person_by_auth(session, str(payload["sub"]))
-        await soft_delete_person_data(session, person)
+        from sqlalchemy import select
+        from pai.domains.student.person.models import Person
+        person = (await session.execute(select(Person).where(
+            Person.external_auth_id == str(payload["sub"])
+        ))).scalar_one_or_none()
+        if person is not None:
+            await soft_delete_person_data(session, person)
     except PersonNotFoundError:
         pass
-    except Exception:
-        logger.warning(
-            "Application profile cleanup skipped (database unavailable). "
-            "Identity deletion will still be attempted.",
-            exc_info=True,
-        )
+    except Exception as exc:
+        await session.rollback()
+        logger.exception("Application account cleanup failed; identity retained for retry")
+        raise AuthError("ACCOUNT_DELETE_INCOMPLETE",
+            "Account cleanup is incomplete. Retry account deletion.", 503) from exc
     try:
         await service.delete_account(access_token, refresh_token)
     except Exception as exc:

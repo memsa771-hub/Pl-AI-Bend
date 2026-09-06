@@ -61,22 +61,17 @@ async def test_test_score_update_marks_admission_stale():
 
 
 @pytest.mark.asyncio
-async def test_unrelated_field_does_not_touch_goals():
-    """Updating a field not in VAULT_FIELDS_THAT_AFFECT_GOALS must not touch any goal."""
-    person_id = uuid.uuid4()
+async def test_every_accepted_field_can_invalidate_goal_assessment():
+    goal = _mock_goal("general")
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = [goal]
     session = AsyncMock()
-
-    with patch(
-        "pai.domains.goals.service.enqueue_goal_intelligence_job",
-        new=AsyncMock(),
-    ) as mock_enqueue:
-        affected = await mark_intelligence_stale_for_vault_update(
-            session, person_id, "preferences.preferred_language"  # not in map
-        )
-
-    assert affected == []
-    mock_enqueue.assert_not_awaited()
-    session.execute.assert_not_called()
+    session.execute.return_value = result
+    with patch("pai.domains.goals.service.enqueue_goal_intelligence_job", new=AsyncMock()) as enqueue:
+        affected = await mark_intelligence_stale_for_vault_update(session, goal.person_id, "preferences.preferred_language")
+    assert affected == [goal]
+    assert goal.intelligence_status == "stale"
+    enqueue.assert_awaited_once()
 
 
 @pytest.mark.asyncio

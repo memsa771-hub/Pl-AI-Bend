@@ -28,27 +28,33 @@ async def run_intelligence_worker_once(settings: Settings | None = None) -> bool
         if job.conversation_id is None:
             await mark_job_failed(session, job, RuntimeError("job missing conversation_id"))
             return True
+        job_id, attempt, person_id = job.id, job.attempts, job.person_id
         payload = job.payload or {}
         gateway = LLMGateway(settings)
         try:
-            await run_intelligence_followup(
-                settings=settings,
-                gateway=gateway,
-                person_id=job.person_id,
-                conversation_id=job.conversation_id,
-                user_message=str(payload.get("user_message") or ""),
-                user_message_id=str(payload.get("user_message_id") or ""),
-                extraction_required=bool(payload.get("extraction_required")),
-                task_proposals=proposals_from_payload(payload.get("task_proposals")),
-                run_id=payload.get("run_id"),
-            )
+            from pai.platform.jobs.lease import pin_lease
+            if not await pin_lease(session, job):
+                return True
+            async with asyncio.timeout(540):
+                await run_intelligence_followup(
+                    settings=settings,
+                    gateway=gateway,
+                    person_id=job.person_id,
+                    conversation_id=job.conversation_id,
+                    user_message=str(payload.get("user_message") or ""),
+                    user_message_id=str(payload.get("user_message_id") or ""),
+                    extraction_required=bool(payload.get("extraction_required")),
+                    task_proposals=proposals_from_payload(payload.get("task_proposals")),
+                    run_id=payload.get("run_id"),
+                )
             fresh = await session.get(type(job), job.id)
             if fresh is not None:
                 await mark_job_done(session, fresh)
         except Exception as exc:
-            logger.exception("Intelligence job failed job=%s person=%s", job.id, job.person_id)
+            logger.exception("Intelligence job failed job=%s person=%s", job_id, person_id)
             await session.rollback()
-            fresh = await session.get(type(job), job.id)
+            from pai.platform.jobs.lease import load_attempt_for_failure
+            fresh = await load_attempt_for_failure(session, type(job), job_id, attempt)
             if fresh is not None:
                 await mark_job_failed(session, fresh, exc)
         finally:

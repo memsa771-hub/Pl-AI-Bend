@@ -79,29 +79,12 @@ def _norm(text: str | None) -> str:
 
 
 def _anchor_match_score(goal: Goal, anchors: dict[str, Any]) -> float:
-    """Return 0-1 similarity of new anchors against existing goal.
-
-    Matching key types: goal_type, target_country, degree_level, program, role.
-    Score ≥ 0.6 = same goal.
-    """
-    if goal.goal_type != anchors.get("goal_type", goal.goal_type):
-        return 0.0
-    score = 0.0
-    checks: list[tuple[str | None, str | None, float]] = [
-        (goal.target_country, anchors.get("target_country"), 0.35),
-        (goal.degree_level, anchors.get("degree_level"), 0.25),
-        (goal.program, anchors.get("program"), 0.20),
-        (goal.role, anchors.get("role"), 0.35),
-        (goal.target_company, anchors.get("target_company"), 0.25),
-    ]
-    for existing, incoming, weight in checks:
-        if existing and incoming:
-            if _norm(existing) == _norm(incoming):
-                score += weight
-        elif not existing and not incoming:
-            # Both absent — neutral (not penalised)
-            pass
-    return min(score, 1.0)
+    """Legacy compatibility: only explicit identity, never weighted similarity."""
+    explicit_id = anchors.get("existing_goal_id")
+    if explicit_id:
+        return float(str(goal.id) == str(explicit_id))
+    title = anchors.get("title")
+    return float(bool(title and isinstance(goal.title, str) and _norm(goal.title) == _norm(title)))
 
 
 def _has_hard_conflict(goal: Goal, anchors: dict[str, Any]) -> bool:
@@ -183,26 +166,25 @@ async def find_matching_goal(
     *,
     threshold: float = 0.6,
 ) -> Goal | None:
-    """Find an existing (non-archived) goal that is the same pursuit as the incoming anchors."""
-    goal_type = anchors.get("goal_type")
-    if not goal_type:
+    """Match an owned explicit identity or an exact title; never infer shared intent."""
+    del threshold
+    query = select(Goal).where(Goal.person_id == person_id,
+                               Goal.lifecycle_status != LIFECYCLE_ARCHIVED)
+    explicit_id = anchors.get("existing_goal_id")
+    if explicit_id:
+        try:
+            goal_id = uuid.UUID(str(explicit_id))
+        except ValueError:
+            return None
+        result = await session.execute(query.where(Goal.id == goal_id))
+        return result.scalar_one_or_none()
+    title = str(anchors.get("title") or "").strip().casefold()
+    if not title:
         return None
-    result = await session.execute(
-        select(Goal).where(
-            Goal.person_id == person_id,
-            Goal.goal_type == goal_type,
-            Goal.lifecycle_status != LIFECYCLE_ARCHIVED,
-        )
-    )
-    candidates = result.scalars().all()
-    best: Goal | None = None
-    best_score = 0.0
-    for g in candidates:
-        s = _anchor_match_score(g, anchors)
-        if s > best_score:
-            best_score = s
-            best = g
-    return best if best_score >= threshold else None
+    result = await session.execute(query)
+    matches = [g for g in result.scalars().all()
+               if (g.title or "").strip().casefold() == title]
+    return matches[0] if len(matches) == 1 else None
 
 
 async def create_goal(
@@ -449,15 +431,13 @@ async def mark_intelligence_stale_for_vault_update(
     When a Vault field changes, mark affected goal summaries stale and re-enqueue.
     Returns goals that were touched.
     """
-    affected_types = VAULT_FIELDS_THAT_AFFECT_GOALS.get(vault_field_key, [])
-    if not affected_types:
-        return []
+    affected_types = [kind.value for kind in GoalType]
 
     result = await session.execute(
         select(Goal).where(
             Goal.person_id == person_id,
             Goal.goal_type.in_(affected_types),
-            Goal.lifecycle_status.in_([LIFECYCLE_ACTIVE, LIFECYCLE_PAUSED]),
+            Goal.lifecycle_status != LIFECYCLE_ARCHIVED,
         )
     )
     goals = list(result.scalars().all())

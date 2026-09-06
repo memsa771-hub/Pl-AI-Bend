@@ -57,11 +57,6 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/pai"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/pai/intelligences/counselor/prompts" = "pai/intelligences/counselor/prompts"
-"src/pai/intelligences/vault/prompts" = "pai/intelligences/vault/prompts"
-"src/pai/intelligences/documents/data" = "pai/intelligences/documents/data"
-
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

@@ -11,7 +11,7 @@ class TranscriptExtraction(BaseModel):
     degree: str | None = None
     program: str | None = None
     cumulative_gpa: float | None = None
-    gpa_scale: float | None = 4.0
+    gpa_scale: float | None = None
     evidence_text: str = ""
     courses: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -36,7 +36,7 @@ def to_field_map(row: TranscriptExtraction) -> list[tuple[str, object, str]]:
         out.append(
             (
                 "education.gpa",
-                {"value": row.cumulative_gpa, "scale": row.gpa_scale or 4.0, "type": "cumulative"},
+                {"value": row.cumulative_gpa, "scale": row.gpa_scale, "type": "cumulative"},
                 row.evidence_text,
             )
         )

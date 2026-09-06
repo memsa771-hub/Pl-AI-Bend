@@ -111,23 +111,32 @@ async def resolve_case(
 ) -> VerificationCase:
     if resolution_type not in RESOLUTIONS:
         raise AuthError(code="INVALID_RESOLUTION", message="Unknown resolution type.", status_code=400)
+    from pai.domains.student.person.write_lock import lock_person
+    await lock_person(session, person.id)
     result = await session.execute(
         select(VerificationCase).where(
             VerificationCase.id == case_id,
             VerificationCase.person_id == person.id,
-        )
+        ).with_for_update()
     )
     case = result.scalar_one_or_none()
     if case is None:
         raise CaseNotFoundError()
+    if case.resolved_at is not None:
+        if case.resolution_type == resolution_type:
+            return case
+        raise AuthError("RESOLUTION_CONFLICT", "This case was already resolved.", 409)
     case.status = resolution_type
     case.resolution_type = resolution_type
     case.resolution_notes = notes
     case.resolved_at = datetime.now(UTC)
     if resolution_type == "resolved_document_correct" and case.incoming_document_fact_id:
         fact = await session.get(DocumentFact, case.incoming_document_fact_id)
-        if fact is not None and (fact.evidence_text or "").strip():
-            await accept_vault_candidates(
+        if fact is None or fact.person_id != person.id or not (fact.evidence_text or "").strip():
+            await session.rollback()
+            raise AuthError("RESOLUTION_NOT_APPLIED", "The document evidence is unavailable.", 422)
+        if fact is not None:
+            outcomes, pending = await accept_vault_candidates(
                 session,
                 person,
                 [
@@ -145,13 +154,10 @@ async def resolve_case(
                 already_reconciled=True,
                 apply_order=list(policy().get("apply_order") or []),
             )
+            if not outcomes or pending or any(o.status not in ("accepted", "reinforced", "updated") for o in outcomes):
+                await session.rollback()
+                raise AuthError("RESOLUTION_NOT_APPLIED", "The fact needs further review.", 422)
             fact.reconciliation_status = "applied_user_confirmed"
-    if resolution_type == "resolved_document_correct" and case.document_id:
-        confirmed = await session.get(Document, case.document_id)
-        if confirmed is not None and confirmed.identity_status == "mismatch":
-            confirmed.identity_status = "matched"
-            if confirmed.verification_status == "identity_mismatch":
-                confirmed.verification_status = "needs_review"
     if resolution_type == "resolved_wrong_document" and case.document_id:
         doc = await session.get(Document, case.document_id)
         if doc is not None:

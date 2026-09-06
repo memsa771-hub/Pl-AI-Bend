@@ -16,14 +16,15 @@ def test_coerce_country_accepts_iso_and_exonyms():
 
 
 def test_extract_countries_uses_iso_alpha2_not_display_names():
-    assert extract_countries_from_text("MS AI in Germany and China") == ["DE", "CN"]
-    assert extract_countries_from_text("study in the UK or UAE") == ["GB", "AE"]
+    assert extract_countries_from_text("MS AI in Germany and China") == []
+    assert extract_countries_from_text("study in the UK or UAE") == []
     assert "US" not in extract_countries_from_text("tell us about your plans")
 
 
 def test_country_codes_from_value_keeps_compound_names():
     assert country_codes_from_value("Trinidad and Tobago") == ["TT"]
-    assert country_codes_from_value("Germany, China") == ["DE", "CN"]
+    assert country_codes_from_value(["Germany", "China"]) == ["DE", "CN"]
+    assert country_codes_from_value("not Germany, China instead") == []
 
 
 def test_normalize_phone_e164():

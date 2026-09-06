@@ -39,6 +39,8 @@ def pdf_page_texts(data: bytes) -> list[str]:
         except Exception:
             return []
     parts: list[str] = []
+    if len(reader.pages) > 100:
+        return []
     for page in reader.pages:
         try:
             parts.append(page.extract_text() or "")
@@ -54,7 +56,10 @@ def _pdf_text(data: bytes) -> str:
 def _docx_text(data: bytes) -> str:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
-            xml = zf.read("word/document.xml")
+            info = zf.getinfo("word/document.xml")
+            if info.file_size > 8 * 1024 * 1024:
+                return ""
+            xml = zf.read(info)
     except Exception:
         return ""
     try:

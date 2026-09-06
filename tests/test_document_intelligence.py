@@ -13,7 +13,7 @@ def test_generated_docs_are_not_evidence():
 
 def test_identity_mismatch_is_deterministic():
     assert names_match("Musawir Khan", "Musawir Khan") == "matched"
-    assert names_match("Musawir Khan", "Ahmed Khan") == "mismatch"
+    assert names_match("Musawir Khan", "Ahmed Khan") == "ambiguous"
 
 
 def test_gpa_critical_conflict_does_not_auto_apply():
@@ -89,12 +89,12 @@ def test_classify_uses_ocr_text_when_filename_is_generic():
     from pai.intelligences.documents.classification.taxonomy import classify_from_name
     from pai.intelligences.documents.classification.taxonomy import type_meta
 
-    assert classify_from_name("passport-scan.png") == "passport"
+    assert classify_from_name("passport-scan.png") == "other"
     assert classify_from_name("scan.jpg") == "other"
-    assert classify_from_name("scan.jpg", text="Republic of Pakistan Passport") == "passport"
+    assert classify_from_name("scan.jpg", text="Republic of Pakistan Passport") == "other"
     assert classify_from_name("scan.jpg", hint="resume", text="Official Transcript CGPA") == "resume"
-    assert classify_from_name("scan.jpg", text="Official Transcript CGPA") == "transcript"
-    assert classify_from_name("my-sop.pdf") == "sop"
+    assert classify_from_name("scan.jpg", text="Official Transcript CGPA") == "other"
+    assert classify_from_name("my-sop.pdf") == "other"
     assert classify_from_name("x.pdf", text="statement of purpose") != "sop"
     assert type_meta("transcript")["extractor"] == "transcript"
     assert type_meta("lor")["party_roles"] == ["subject", "author"]

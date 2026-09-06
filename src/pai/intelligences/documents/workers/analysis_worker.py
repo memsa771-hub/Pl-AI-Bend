@@ -23,6 +23,7 @@ _CLAIM_SQL = """
 SELECT c.id
 FROM document_jobs AS c
 WHERE c.status = 'pending'
+  AND c.attempts < 3
   AND c.available_at <= :now
   AND NOT EXISTS (
       SELECT 1
@@ -83,13 +84,19 @@ async def run_document_worker_once(settings: Settings | None = None) -> bool:
             job = await claim_next_job(session)
             if job is None:
                 return False
+            job_id, attempt = job.id, job.attempts
             try:
-                await process_document_job(session, settings, job, storage=storage, gateway=gateway)
+                from pai.platform.jobs.lease import pin_lease
+                if not await pin_lease(session, job):
+                    return True
+                async with asyncio.timeout(540):
+                    await process_document_job(session, settings, job, storage=storage, gateway=gateway)
                 await session.commit()
             except Exception as exc:
                 logger.exception("Document job failed")
                 await session.rollback()
-                job = await session.get(DocumentJob, job.id)
+                from pai.platform.jobs.lease import load_attempt_for_failure
+                job = await load_attempt_for_failure(session, DocumentJob, job_id, attempt)
                 if job:
                     apply_failure(job, exc)
                     await session.commit()

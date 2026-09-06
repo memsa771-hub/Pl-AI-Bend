@@ -38,17 +38,15 @@ def test_repeat_strengthens_same_memory():
     assert rec.recurrence == 1
     assert old is None
 
-    action, rec, old = apply_draft(rec, drafts[0])
+    action, unchanged, _ = apply_draft(rec, drafts[0])
+    assert action == "noop"
+    assert unchanged.recurrence == 1
+    second = drafts_from_turn(accepted=[first.model_copy(update={"source_reference": "m2"})])[0]
+    action, rec, old = apply_draft(rec, second)
     assert action == "strengthen"
     assert rec.recurrence == 2
-    assert rec.stability > 0.2
     assert rec.evidence_count == 2
-    assert old is None
-
-    action, rec, _ = apply_draft(rec, drafts[0])
-    action, rec, _ = apply_draft(rec, drafts[0])
-    assert rec.recurrence == 4
-    assert rec.status == "active"
+    assert rec.confidence == first.confidence
 
 
 def test_value_change_versions_instead_of_overwrite():
@@ -62,6 +60,7 @@ def test_value_change_versions_instead_of_overwrite():
                 field_key="application.study_country",
                 value="US",
                 is_correction=True,
+                source_reference="m2",
                 evidence_text="Germany is definitely not first, USA is",
             )
         ]

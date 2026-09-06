@@ -189,7 +189,7 @@ def test_change_password(client, fake_provider):
     assert response.cookies.get("pai_refresh_token") is None
 
 
-def test_me_and_delete_account(client, fake_provider):
+def test_account_cleanup_failure_retains_identity(client, fake_provider):
     fake_provider.users["me@example.com"] = {
         "id": "user-1",
         "email": "me@example.com",
@@ -206,9 +206,19 @@ def test_me_and_delete_account(client, fake_provider):
     assert me.status_code == 200
     assert me.json()["data"]["user"]["email"] == "me@example.com"
 
-    deleted = client.delete("/api/v1/account", headers={"Authorization": f"Bearer {token}"})
-    assert deleted.status_code == 200
-    assert fake_provider.deleted == ["user-1"]
+    from unittest.mock import AsyncMock
+    from pai.interfaces.api.dependencies import get_db
+    async def unavailable_db():
+        session = AsyncMock()
+        session.execute.side_effect = RuntimeError("database unavailable")
+        yield session
+    client.app.dependency_overrides[get_db] = unavailable_db
+    try:
+        deleted = client.delete("/api/v1/account", headers={"Authorization": f"Bearer {token}"})
+    finally:
+        client.app.dependency_overrides.pop(get_db, None)
+    assert deleted.status_code == 503
+    assert fake_provider.deleted == []
 
 
 def test_signup_duplicate_email(client, fake_provider):

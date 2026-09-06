@@ -143,7 +143,7 @@ class OnboardingWorkItem(BaseModel):
 
 
 class OnboardingTestScoreItem(BaseModel):
-    name: StandardizedTest
+    name: str = Field(min_length=1, max_length=128)
     score: str = Field(min_length=1, max_length=64, examples=["7.5"])
 
     @field_validator("score", mode="before")
@@ -168,12 +168,12 @@ class OnboardingSubmit(BaseModel):
     currentCountry: str = Field(min_length=2, max_length=2, examples=["PK"])
     currentCity: str = Field(min_length=2, max_length=128, examples=["Lahore"])
     currentStatus: CurrentStatus
-    educationLevel: EducationLevel
+    educationLevel: str = Field(min_length=1, max_length=128)
     institution: str | None = Field(
         default=None, max_length=256, examples=["University of Toronto"]
     )
     degree: str | None = Field(default=None, max_length=128, examples=["BSCS"])
-    major: FieldOfStudy | None = None
+    major: str | None = Field(default=None, max_length=256)
     otherLevelLabel: str | None = Field(
         default=None,
         max_length=128,
@@ -192,13 +192,14 @@ class OnboardingSubmit(BaseModel):
     )
     gender: Gender
     linkedinUrl: str | None = Field(default=None, max_length=512)
-    gpa: float | None = Field(default=None, ge=0, le=4)
+    gpa: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    gpaScale: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     graduationYear: int | None = Field(default=None, ge=1950, le=2100)
     skills: list[OnboardingSkillItem] = Field(default_factory=list)
     workExperience: list[OnboardingWorkItem] = Field(default_factory=list)
     targetCountries: list[str] = Field(default_factory=list)
     studyCountry: str | None = Field(default=None, min_length=2, max_length=2, examples=["DE"])
-    intake: IntakeSeason | None = None
+    intake: str | None = Field(default=None, max_length=128)
     intakeYear: int | None = Field(default=None, ge=2020, le=2100)
     budget: BudgetBand | None = None
     scholarships: bool | None = None
@@ -280,6 +281,4 @@ class OnboardingSubmit(BaseModel):
             return self.degree
         if self.educationLevel == EducationLevel.other and self.otherLevelLabel:
             return self.otherLevelLabel
-        if self.major:
-            return None
-        return DEGREE_FOR_LEVEL.get(self.educationLevel)
+        return None

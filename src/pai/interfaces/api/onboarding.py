@@ -68,7 +68,7 @@ async def upload_onboarding_cv(
     person: Annotated[Person, Depends(resolve_person_from_token)],
     file: UploadFile = File(...),
 ) -> JSONResponse:
-    data = await file.read()
+    data = await file.read(settings.document_max_bytes + 1)
     storage = SupabaseStorageProvider(settings)
     gateway: LLMGateway = getattr(request.app.state, "llm_gateway", None) or LLMGateway(settings)
     try:

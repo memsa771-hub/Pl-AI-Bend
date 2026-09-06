@@ -55,6 +55,7 @@ def evaluate_candidate(
             outcome="reject",
             rationale_summary="Failed schema or catalog validation",
         )
+    candidate = validated
     field = get_catalog_field(candidate.field_key)
     assert field is not None
     active_values = existing_state.get("active_values") or {}

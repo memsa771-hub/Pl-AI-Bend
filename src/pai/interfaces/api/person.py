@@ -45,11 +45,15 @@ class PersonProfilePatch(BaseModel):
 
 
 class EducationCreate(BaseModel):
-    institution: str
+    institution: str | None = None
     degree: str | None = None
     major: str | None = None
     graduationYear: int | None = None
     status: str | None = None
+    gpa: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    gpaScale: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    qualificationData: dict | None = None
+
 
 
 class EducationPatch(BaseModel):
@@ -58,6 +62,10 @@ class EducationPatch(BaseModel):
     major: str | None = None
     graduationYear: int | None = None
     status: str | None = None
+    gpa: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    gpaScale: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    qualificationData: dict | None = None
+
 
 
 @router.post("/bootstrap")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import uuid
 from typing import Any
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -57,38 +58,27 @@ class SchemaRoutingMockProvider:
 
 
 def test_greetings_skip_extraction():
-    assert should_extract_facts("Hello") is False
-    assert should_extract_facts("Thanks!") is False
-    assert should_extract_facts("Please continue") is False
-    assert is_greeting("hi") is True
-    assert is_greeting("  Hey!  ") is True
+    assert should_extract_facts("Hello") is True
+    assert should_extract_facts("Thanks!") is True
+    assert should_extract_facts("Please continue") is True
+    assert is_greeting("hi") is False
+    assert is_greeting("  Hey!  ") is False
     assert is_greeting("I want MS CS") is False
-    assert counseling_reply_max_tokens("hi", 400) == 96
+    assert counseling_reply_max_tokens("hi", 400) == 400
     assert counseling_reply_max_tokens("What should I do next?", 400) == 400
 
 
-def test_web_search_only_for_live_research(test_settings):
-    off = test_settings.model_copy(update={"tavily_api_key": "", "enable_counselor_tools": True})
-    assert counselor_web_search_enabled(off) is False
-    on = test_settings.model_copy(
-        update={"tavily_api_key": "tvly-test", "enable_counselor_tools": True}
-    )
-    assert counselor_web_search_enabled(on) is False
-    assert counselor_web_search_enabled(on, "Hello") is False
-    assert counselor_web_search_enabled(on, "I live in Berlin") is False
-    assert counselor_web_search_enabled(on, "What IELTS score do I need?") is True
-    killed = test_settings.model_copy(
-        update={"tavily_api_key": "tvly-test", "enable_counselor_tools": False}
-    )
-    assert counselor_web_search_enabled(killed, "find the deadline") is False
+def test_web_search_uses_semantic_decision_and_availability(test_settings):
+    on = test_settings.model_copy(update={"tavily_api_key": "test", "enable_counselor_tools": True})
+    assert counselor_web_search_enabled(on, "hello", understanding=SimpleNamespace(needs_research=True))
+    assert not counselor_web_search_enabled(on, "deadline", understanding=SimpleNamespace(needs_research=False))
+    off = on.model_copy(update={"tavily_api_key": ""})
+    assert not counselor_web_search_enabled(off, understanding=SimpleNamespace(needs_research=True))
 
 
-def test_classify_turn_kinds():
-    assert classify_turn("Hi") == "PERSONAL_ADVICE"
-    assert classify_turn("I live in Berlin") == "PROFILE_UPDATE"
-    assert classify_turn("find the deadline for CSC") == "LIVE_RESEARCH"
-    assert classify_turn("yeh dhoond do") == "LIVE_RESEARCH"
-    assert classify_turn("What should I do next?") == "PERSONAL_ADVICE"
+def test_classify_turn_uses_validated_understanding():
+    assert classify_turn("find a deadline") == "PERSONAL_ADVICE"
+    assert classify_turn("你好", understanding=SimpleNamespace(turn_kind="LIVE_RESEARCH")) == "LIVE_RESEARCH"
 
 
 def test_substantive_messages_trigger_extraction():
@@ -100,9 +90,9 @@ def test_substantive_messages_trigger_extraction():
     assert should_extract_facts("I live in Dubai and want NYU Abu Dhabi") is True
     assert should_extract_facts("I live in Berlin") is True
     assert should_extract_facts("I moved last month") is True
-    assert should_extract_facts("Hello") is False
-    assert should_extract_facts("help me") is False
-    assert should_extract_facts("ok go") is False
+    assert should_extract_facts("Hello") is True
+    assert should_extract_facts("help me") is True
+    assert should_extract_facts("ok go") is True
     assert should_extract_facts("COkay lock in USTC and STJU") is True
 
 
@@ -122,9 +112,9 @@ def test_questions_carrying_facts_still_extract():
 
 
 def test_trivial_turns_still_skip_extraction():
-    assert should_extract_facts("What do you mean?") is False
-    assert should_extract_facts("can you explain") is False
-    assert should_extract_facts("thanks") is False
+    assert should_extract_facts("What do you mean?") is True
+    assert should_extract_facts("can you explain") is True
+    assert should_extract_facts("thanks") is True
     assert should_extract_facts("") is False
 
 
@@ -339,7 +329,7 @@ def test_counselor_json_preamble_does_not_leak_into_reply():
 def test_llm_call_budget_constants():
     from pai.intelligences.counselor.orchestrator import MAX_LLM_CALLS_PER_TURN
 
-    assert MAX_LLM_CALLS_PER_TURN == 2
+    assert MAX_LLM_CALLS_PER_TURN == 3
 
 
 def test_chat_graph_replies_without_waiting_on_extract_chain():
@@ -469,7 +459,7 @@ def test_substantive_turn_calls_extraction_then_conversation(test_settings):
         )
     )
     # Short GPA line is booster-only — skip the extract LLM.
-    assert mock.calls == ["ConversationResult"]
+    assert mock.calls == ["FactExtractionResult", "ConversationResult"]
 
 
 def test_goal_statement_still_runs_extract_llm(test_settings):

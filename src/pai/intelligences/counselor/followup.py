@@ -89,7 +89,7 @@ async def run_intelligence_followup(
             await session.execute(
                 select(Person)
                 .options(selectinload(Person.vault))
-                .where(Person.id == person_id)
+                .where(Person.id == person_id, Person.deleted_at.is_(None))
             )
         ).scalar_one_or_none()
         if person is None:
@@ -101,7 +101,11 @@ async def run_intelligence_followup(
             settings, person.id, session_factory=factory
         )
         if run_id:
-            orch._run = await session.get(OrchestrationRun, uuid.UUID(run_id))
+            orch._run = await session.get(OrchestrationRun, uuid.UUID(run_id), with_for_update=True, populate_existing=True)
+            if orch._run is not None and (orch._run.person_id != person_id or orch._run.conversation_id != conversation_id):
+                raise ValueError("Follow-up run ownership mismatch")
+            if orch._run is not None and orch._run.status == "completed":
+                return
         state = {
             "person_id": str(person_id),
             "conversation_id": str(conversation_id),
@@ -119,6 +123,8 @@ async def run_intelligence_followup(
             if orch._run is not None:
                 orch._run.status = "completed"
             await session.commit()
+            from pai.domains.memory.formation import embed_pending_memories
+            await embed_pending_memories(factory, person_id)
         except Exception:
             logger.exception("Intelligence follow-up failed person=%s", person_id)
             await session.rollback()

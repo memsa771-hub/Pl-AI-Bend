@@ -71,6 +71,8 @@ def normalize_candidate(candidate: VaultCandidate) -> VaultCandidate | None:
         return None
     candidate.field_key = key
     candidate.value = _normalize_value(key, candidate.value)
+    if key == "education.gpa" and isinstance(candidate.value, dict):
+        candidate.requires_confirmation |= bool(candidate.value.get("requires_confirmation"))
     if candidate.confidence > 1.0:
         candidate.confidence = 1.0
     if candidate.confidence < 0.0:
@@ -79,8 +81,9 @@ def normalize_candidate(candidate: VaultCandidate) -> VaultCandidate | None:
 
 
 def _normalize_value(field_key: str, value: Any) -> Any:
-    if field_key == "education.gpa" and isinstance(value, (int, float)):
-        return {"gpa": float(value), "gpa_scale": 4.0}
+    if field_key == "education.gpa":
+        from pai.domains.student.normalization.grades import parse_grade
+        return parse_grade(value) or value
     if field_key == "education.marks":
         if isinstance(value, str) and "/" in value:
             parts = value.split("/", 1)
@@ -121,31 +124,10 @@ def _normalize_value(field_key: str, value: Any) -> Any:
             return token
         return value
     if field_key == "education.additional_maths" and isinstance(value, str):
-        return value.strip().lower() in ("true", "yes", "y", "1")
+        return {"true": True, "false": False}.get(value.strip().lower(), value)
     if field_key == "finance.scholarship_interest" and isinstance(value, str):
-        return value.strip().lower() in ("true", "yes", "y", "1")
-    if field_key == "education.highest_level" and isinstance(value, str):
-        token = value.strip().lower().replace(" ", "_").replace("'", "")
-        aliases = {
-            "bachelors": "bachelor",
-            "bachelor_of": "bachelor",
-            "bs": "bachelor",
-            "ba": "bachelor",
-            "undergraduate": "bachelor",
-            "masters": "master",
-            "msc": "master",
-            "ms": "master",
-            "graduate": "master",
-            "doctorate": "phd",
-            "highschool": "high_school",
-            "secondary": "high_school",
-            "a_levels": "other",
-            "alevels": "other",
-            "ib": "other",
-        }
-        token = aliases.get(token, token)
-        allowed = {"high_school", "diploma", "bachelor", "master", "phd", "other"}
-        return token if token in allowed else value
+        return {"true": True, "false": False}.get(value.strip().lower(), value)
+
     return value
 
 

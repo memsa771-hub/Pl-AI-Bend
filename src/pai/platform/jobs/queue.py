@@ -17,6 +17,7 @@ _CLAIM_SQL = """
 SELECT c.id
 FROM person_jobs AS c
 WHERE c.status = 'pending'
+  AND c.attempts < 3
   AND c.available_at <= :now
   AND NOT EXISTS (
       SELECT 1

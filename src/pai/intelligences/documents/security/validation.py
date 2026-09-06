@@ -19,7 +19,7 @@ def sniff_mime(data: bytes, filename: str = "") -> str | None:
         return "image/jpeg"
     if data[:2] == b"PK" and _looks_like_docx(data):
         return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    if _looks_like_text(data) or (filename or "").lower().endswith(".txt"):
+    if _looks_like_text(data):
         return "text/plain"
     return None
 
@@ -27,6 +27,11 @@ def sniff_mime(data: bytes, filename: str = "") -> str | None:
 def _looks_like_docx(data: bytes) -> bool:
     try:
         with zipfile.ZipFile(BytesIO(data)) as zf:
+            entries = zf.infolist()
+            if len(entries) > 2000 or sum(e.file_size for e in entries) > 32 * 1024 * 1024:
+                return False
+            if any(e.file_size > 8 * 1024 * 1024 or e.flag_bits & 1 for e in entries):
+                return False
             names = set(zf.namelist())
     except zipfile.BadZipFile:
         return False

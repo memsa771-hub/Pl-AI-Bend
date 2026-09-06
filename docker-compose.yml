@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pai
+      POSTGRES_PASSWORD: pai
+      POSTGRES_DB: pai_auth
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pai -d pai_auth"]
+      interval: 3s
+      timeout: 5s
+      retries: 10

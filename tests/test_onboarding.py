@@ -80,7 +80,7 @@ def test_submit_schema_high_school_does_not_need_degree():
         "major": None,
     }
     body = OnboardingSubmit.model_validate(payload)
-    assert body.resolved_degree() == "High School"
+    assert body.resolved_degree() is None
 
 
 def test_submit_schema_rejects_vague_primary_goal():
@@ -313,7 +313,7 @@ def test_form_submit_with_cv_path_tag_still_allowed(verified_user):
     assert "enums" not in data
 
 
-def test_vault_batch_write_uses_one_select():
+def test_vault_batch_write_locks_owner_then_reads_values_once():
     import asyncio
     import uuid
     from types import SimpleNamespace
@@ -331,7 +331,7 @@ def test_vault_batch_write_uses_one_select():
 
         async def execute(self, _stmt):
             self.queries += 1
-            return SimpleNamespace(scalars=lambda: [])
+            return SimpleNamespace(scalars=lambda: [], scalar_one_or_none=lambda: object())
 
         async def flush(self) -> None:
             self.flushes += 1
@@ -358,7 +358,7 @@ def test_vault_batch_write_uses_one_select():
             ],
             skip_consent_check=True,
         )
-        assert session.queries == 1
+        assert session.queries == 2
         assert session.flushes == 1
         kinds = [type(obj) for obj in session.added]
         assert kinds.count(VaultValue) == 3

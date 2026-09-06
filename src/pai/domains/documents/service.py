@@ -140,7 +140,7 @@ async def _current_vault_values(
         select(VaultValue.field_key, VaultValue.value).where(
             VaultValue.vault_id == vault_id,
             VaultValue.field_key.in_(field_keys),
-            VaultValue.status.in_(("active", "pending_confirmation")),
+            VaultValue.status == "active",
         )
     )
     return {key: value for key, value in result.all()}

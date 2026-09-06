@@ -50,6 +50,10 @@ class OmnibusLLMExtractor:
         )
         result = await self._run(prompt, task=_task_for(request.source))
         for c in result.fact_candidates:
+            if "temporal_status" not in c.model_fields_set:
+                c.temporal_status = "unknown"
+            if "attributed_to" not in c.model_fields_set:
+                c.attributed_to = "unknown"
             c.source_type = _schema_source(request.source)  # type: ignore[assignment]
             if not c.source_reference:
                 c.source_reference = request.source_reference
@@ -71,7 +75,10 @@ class OmnibusLLMExtractor:
                                 "persistent fact from the source — do not summarize or decide "
                                 "importance. Preserve evidence spans and assertion_status "
                                 "(explicit|inferred|uncertain|negated|hypothetical). Never invent "
-                                "facts. Map to the Vault catalog when possible; otherwise use "
+                                "facts. Always specify attributed_to (self or the actual subject). Set temporal_status to current, past, future or unknown. Future/planned "
+                                "qualifications are not completed or current truth. Preserve native grades, "
+                                "unknown scales, original qualification names and date precision. "
+                                "Map to the Vault catalog when possible; otherwise use "
                                 "memory.observed. For CVs extract every distinct school, job, "
                                 "skill, project, certification, test score, and location named. "
                                 "PAI is global: copy names the student used; do not assume "
@@ -79,7 +86,10 @@ class OmnibusLLMExtractor:
                                 "as life_aim, turn_action, or none (any language, including Roman "
                                 "Urdu). Set current_goal.goal_type to admission, job, internship, "
                                 "or general when kind is life_aim. evidence_text must be a verbatim span of the source. "
-                                "Never write counselor replies. Return JSON only."
+                                "Use existing_goal_id only for the same pursuit in the supplied owned goals; "
+                                "otherwise null. Extract goal anchors semantically from explicit evidence, "
+                                "preserving original qualification and place names. Shared country or missing "
+                                "details do not imply the same pursuit. Never write counselor replies. Return JSON only."
                             ),
                         ),
                         LLMMessage(role="user", content=user_prompt),

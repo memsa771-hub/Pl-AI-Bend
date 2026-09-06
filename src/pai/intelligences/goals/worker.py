@@ -29,6 +29,7 @@ _CLAIM_SQL = """
 SELECT c.id
 FROM goal_jobs AS c
 WHERE c.status = 'pending'
+  AND c.attempts < 3
   AND c.available_at <= :now
   AND NOT EXISTS (
       SELECT 1
@@ -46,12 +47,8 @@ LIMIT 1
 async def claim_next_goal_job(session: AsyncSession) -> GoalJob | None:
     from sqlalchemy import text
 
-    cutoff = datetime.now(UTC) - timedelta(seconds=600)
-    await session.execute(
-        update(GoalJob)
-        .where(GoalJob.status == "processing", GoalJob.locked_at <= cutoff)
-        .values(status="pending", locked_at=None)
-    )
+    from pai.platform.jobs.lease import reclaim_expired_leases
+    await reclaim_expired_leases(session, GoalJob)
     now = datetime.now(UTC)
     result = await session.execute(
         text(_CLAIM_SQL), {"now": now, "lock_ns": _GOAL_JOB_LOCK_NS}
@@ -136,6 +133,17 @@ async def _save_intelligence(
     return intel
 
 
+def research_is_fresh(research: dict, *, now=None) -> bool:
+    if research.get("_error"):
+        return False
+    try:
+        retrieved = datetime.fromisoformat(research["retrieved_at"])
+        age = (now or datetime.now(UTC)) - retrieved
+        return timedelta(0) <= age < timedelta(hours=24)
+    except (KeyError, ValueError, TypeError):
+        return False
+
+
 async def process_goal_job(
     session: AsyncSession,
     settings: Settings,
@@ -159,7 +167,7 @@ async def process_goal_job(
         return
 
     person = await session.execute(
-        select(Person).options(selectinload(Person.vault)).where(Person.id == goal.person_id)
+        select(Person).options(selectinload(Person.vault)).where(Person.id == goal.person_id, Person.deleted_at.is_(None))
     )
     person_row = person.scalar_one_or_none()
     if person_row is None:
@@ -167,6 +175,8 @@ async def process_goal_job(
         job.last_error = "Person not found"
         return
 
+    profile_version = person_row.vault.version if person_row.vault else None
+    goal_version = goal.updated_at
     typed_records = await load_typed_profile_records(session, goal.person_id)
     vault_svc = VaultService(settings)
     unified = await vault_svc.get_unified_vault(
@@ -186,14 +196,14 @@ async def process_goal_job(
     kind = job.kind or "goal_intelligence"
 
     if (settings.enable_integrated_goal_analysis and kind == "assessment_refresh"
-            and intel is not None and intel.research):
+            and intel is not None and research_is_fresh(intel.research or {})):
         from pai.intelligences.goals.integrated import analyze_goal
 
         result = await analyze_goal(
             gateway, settings=settings, goal_type=goal.goal_type, goal_title=goal.title,
             vault_snapshot=vault_snapshot, research=intel.research,
         )
-    elif kind == "assessment_refresh" and intel is not None and intel.research:
+    elif kind == "assessment_refresh" and intel is not None and research_is_fresh(intel.research or {}):
         # Reuse existing research; re-run Assessment→Gaps→Planning
         from pai.intelligences.goals.pipeline import run_assessment_stage, run_gaps_stage, run_planning_stage, build_counselor_brief
         assessment = await run_assessment_stage(
@@ -231,7 +241,7 @@ async def process_goal_job(
             "gaps": gaps,
             "plan": plan,
             "counselor_brief": brief,
-            "status": "ready",
+            "status": "partial" if assessment.get("_error") or getattr(gaps, "failed", False) or getattr(plan, "failed", False) else "ready",
             "freshness": {"computed_at": datetime.now(UTC).isoformat()},
         }
     else:
@@ -244,19 +254,19 @@ async def process_goal_job(
             settings=settings,
         )
 
+    from pai.domains.student.person.write_lock import lock_person
+    await lock_person(session, goal.person_id)
+    await session.refresh(goal)
+    if person_row.vault:
+        await session.refresh(person_row.vault)
+    current_version = person_row.vault.version if person_row.vault else None
+    if current_version != profile_version or goal.updated_at != goal_version:
+        goal.intelligence_status = "stale"
+        job.status = "pending"
+        job.locked_at = None
+        job.attempts = 0
+        return
     await _save_intelligence(session, goal, intel, result)
-    # Denormalize research university/company options onto goal.anchors so the
-    # sync resolver can match "focus on Bologna" / "TUM" without creating dupes.
-    options = (result.get("research") or {}).get("options") or []
-    if isinstance(options, list) and options:
-        unis = [
-            str(item).strip()
-            for item in options
-            if isinstance(item, (str, int, float)) and str(item).strip()
-        ]
-        if unis:
-            merged = {**(goal.anchors or {}), "target_universities": unis[:8]}
-            goal.anchors = merged
     job.status = "completed"
     job.locked_at = None
 
@@ -268,15 +278,20 @@ async def run_goal_worker_once(settings: Settings | None = None) -> bool:
         job = await claim_next_goal_job(session)
         if job is None:
             return False
-        job_id = job.id
+        job_id, attempt = job.id, job.attempts
         gateway = LLMGateway(settings)
         try:
-            await process_goal_job(session, settings, job, gateway)
+            from pai.platform.jobs.lease import pin_lease
+            if not await pin_lease(session, job):
+                return True
+            async with asyncio.timeout(540):
+                await process_goal_job(session, settings, job, gateway)
             await session.commit()
         except Exception as exc:
             logger.exception("Goal job failed job=%s", job_id)
             await session.rollback()
-            fresh = await session.get(GoalJob, job_id)
+            from pai.platform.jobs.lease import load_attempt_for_failure
+            fresh = await load_attempt_for_failure(session, GoalJob, job_id, attempt)
             if fresh is not None:
                 apply_failure(fresh, exc, max_attempts=MAX_ATTEMPTS)
                 fresh_goal = await session.get(Goal, fresh.goal_id)

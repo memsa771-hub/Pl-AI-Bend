@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!supabase-setup.template.env
 __pycache__/
 *.py[cod]
 .pytest_cache/

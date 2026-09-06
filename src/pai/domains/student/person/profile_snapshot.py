@@ -27,6 +27,7 @@ def _edu_dict(row: Education) -> dict[str, Any]:
         "graduationYear": row.graduation_year,
         "gpa": row.gpa,
         "gpaScale": row.gpa_scale,
+        "qualification": row.qualification_data or {},
         "percentage": row.percentage,
         "status": row.status,
         "startDate": row.start_date.isoformat() if row.start_date else None,

@@ -93,7 +93,7 @@ async def upload_document(
     allowed_sources = set(load_taxonomy()["source_types"]) - {"ai_generated"}
     if source_type not in allowed_sources:
         source_type = "document_vault"
-    data = await file.read()
+    data = await file.read(settings.document_max_bytes + 1)
     content_type = file.content_type or "application/octet-stream"
     storage = _storage(settings)
     try:

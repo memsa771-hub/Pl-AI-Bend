@@ -116,10 +116,14 @@ class OnboardingService:
         self, session: AsyncSession, person: Person, body: OnboardingSubmit
     ) -> dict[str, Any]:
         """Map the starting profile into the Vault and mark onboarding complete. Idempotent."""
+        from pai.domains.student.person.write_lock import lock_person
+        await lock_person(session, person.id)
         self._require_vault(person)
         person.onboarding_path = body.path or person.onboarding_path or "manual"
         await self._apply_submit(session, person, body)
         await self._touch_vault(session, person)
+        from pai.domains.goals.service import mark_intelligence_stale_for_vault_update
+        await mark_intelligence_stale_for_vault_update(session, person.id, "onboarding")
         if person.onboarding_completed_at is None:
             person.onboarding_completed_at = datetime.now(UTC)
         from pai.domains.journey.service import record_onboarding
@@ -156,6 +160,7 @@ class OnboardingService:
             data=data,
             storage=storage,
             source_type="onboarding",
+            inline_processing=True,
             document_type="resume",
             created_by="student",
         )
@@ -172,6 +177,9 @@ class OnboardingService:
                 status_code=502,
             )
         try:
+            from pai.platform.jobs.lease import pin_lease
+            if not await pin_lease(session, job):
+                raise AuthError("CV_PROCESSING", "Your CV is already being processed.", 409)
             await process_document_job(
                 session, self._settings, job, storage=storage, gateway=gateway
             )
@@ -179,6 +187,9 @@ class OnboardingService:
         except AuthError:
             raise
         except Exception as exc:
+            job_id = job.id
+            await session.rollback()
+            job = await session.get(DocumentJob, job_id)
             job.status = "failed"
             job.last_error = str(exc)[:500]
             await session.commit()
@@ -233,7 +244,7 @@ class OnboardingService:
             ("location.current_city", body.currentCity),
             ("identity.current_status", body.currentStatus.value),
             ("demographics.gender", body.gender.value),
-            ("education.highest_level", body.educationLevel.value),
+            ("education.highest_level", body.educationLevel),
         ]
         if body.linkedinUrl:
             updates.append(("social.linkedin_url", body.linkedinUrl))
@@ -245,7 +256,7 @@ class OnboardingService:
             if len(destinations) > 1:
                 updates.append(("mobility.preferred_regions", destinations))
         if body.intake:
-            cycle = body.intake.value
+            cycle = body.intake
             if body.intakeYear:
                 cycle = f"{cycle} {body.intakeYear}"
             updates.append(("application.admission_cycle", cycle))
@@ -257,7 +268,7 @@ class OnboardingService:
             updates.append(
                 (
                     "application.test_scores",
-                    [{"name": item.name.value, "score": item.score} for item in body.testScores],
+                    [{"name": item.name, "score": item.score} for item in body.testScores],
                 )
             )
         await self._vault.upsert_sparse_fields(
@@ -286,17 +297,17 @@ class OnboardingService:
             else await self._first_education(session, person)
         )
         if row is None:
-            if not body.institution:
-                return
             session.add(
                 Education(
                     person_id=person.id,
                     institution=body.institution,
                     degree=degree,
-                    major=body.major.value if body.major else None,
+                    major=body.major if body.major else None,
                     gpa=body.gpa,
+                    gpa_scale=body.gpaScale,
                     graduation_year=body.graduationYear,
-                    status="completed",
+                    status="unknown",
+                    qualification_data={"original_level": body.educationLevel, "original_name": degree},
                 )
             )
         else:
@@ -305,9 +316,10 @@ class OnboardingService:
             if degree:
                 row.degree = degree
             if body.major is not None:
-                row.major = body.major.value
+                row.major = body.major
             if body.gpa is not None:
                 row.gpa = body.gpa
+                row.gpa_scale = body.gpaScale
             if body.graduationYear is not None:
                 row.graduation_year = body.graduationYear
         if person.vault:

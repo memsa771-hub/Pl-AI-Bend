@@ -23,6 +23,8 @@ class PAIState(TypedDict, total=False):
 
     student_context: StudentContextPack | None
     student_context_json: str
+    turn_understanding: Any
+    discovery_question: str | None
     extraction_required: bool
 
     fact_candidates: list[VaultCandidate]

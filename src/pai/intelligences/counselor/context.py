@@ -22,6 +22,7 @@ class CounselorContext(BaseModel):
     """Compact counselor prompt + stay payload. Not the full Person dump."""
 
     person_id: str
+    discovery_candidates: list[str] = Field(default_factory=list)
     identity: dict[str, Any] = Field(default_factory=dict)
     goal: str | None = None
     education: str | None = None
@@ -105,34 +106,8 @@ class CounselorContext(BaseModel):
         return "\n".join(lines) if lines else "(no stored profile yet)"
 
 
-_PRESSURE = re.compile(
-    r"\b("
-    r"peer pressure|social pressure|"
-    r"everyone (?:says|is|wants|does|doing)|"
-    r"people (?:say|think|want)|"
-    r"they want me|"
-    r"someone else(?:'s)?|"
-    r"my (?:friend|friends|classmates?|cousin|cousins|parents?|family|dad|father|mom|mother|uncle|aunt)|"
-    r"parents? (?:want|said)"
-    r")\b",
-    re.I,
-)
-
-
-def _pressure_signal(*, recent: list[dict], facts: list[str], memory: list[str]) -> str | None:
-    blob = " ".join(
-        [
-            *(str(m.get("content") or "") for m in recent if m.get("role") == "user"),
-            *facts,
-            *memory,
-        ]
-    )
-    if not blob.strip() or not _PRESSURE.search(blob):
-        return None
-    return (
-        "Stated goal may reflect peer pressure rather than personal fit. "
-        "Advise on genuine fit and constraints; do not only chase the named program."
-    )
+def _pressure_signal(**kwargs) -> str | None:
+    return None
 
 
 _profile_cache: dict[str, tuple[int, dict[str, Any]]] = {}
@@ -170,59 +145,38 @@ async def build_counselor_context(
     settings = settings or get_settings()
     if person.vault is None:
         await session.refresh(person, attribute_names=["vault"])
-    version = int(getattr(person.vault, "version", 0) or 0) if person.vault else 0
-    cached = _profile_cache.get(str(person.id))
     identity = {
         "email": person.email,
         "fullName": person.full_name,
         "preferredName": person.preferred_name,
     }
-    if cached and cached[0] == version:
-        facts = list(cached[1].get("facts") or [])
-        missing = list(cached[1].get("missing") or [])
-        raw_missing_critical = list(cached[1].get("raw_missing_critical") or [])
-        raw_missing_important = list(cached[1].get("raw_missing_important") or [])
-        raw_missing_enrichment = list(cached[1].get("raw_missing_enrichment") or [])
-        depth_gaps = list(cached[1].get("depth_gaps") or [])
-    else:
-        typed_records = await load_typed_profile_records(session, person.id)
-        vault_svc = VaultService(settings)
-        unified = await vault_svc.get_unified_vault(
-            session,
-            person,
-            include_sensitive=False,
-            typed_records=typed_records,
-        )
-        completion = unified.get("completion") or {}
-        sparse = unified.get("sparseFields") or {}
-        from pai.domains.journey.service import goal_fact_lines
+    typed_records = await load_typed_profile_records(session, person.id)
+    vault_svc = VaultService(settings)
+    unified = await vault_svc.get_unified_vault(
+        session,
+        person,
+        include_sensitive=False,
+        typed_records=typed_records,
+    )
+    completion = unified.get("completion") or {}
+    sparse = unified.get("sparseFields") or {}
+    from pai.domains.journey.service import goal_fact_lines
 
-        facts = await goal_fact_lines(session, person.id)
-        facts.extend(build_known_facts(identity=identity, sparse=sparse, typed=typed_records))
-        facts = _dedupe_goal_lines(facts)
-        raw_missing_critical = list(completion.get("missingCriticalFields") or [])
-        raw_missing_important = list(completion.get("missingImportantFields") or [])
-        raw_missing_enrichment = list(completion.get("missingEnrichmentFields") or [])
-        missing = _advice_gaps(raw_missing_critical)
-        from pai.intelligences.counselor.profile_depth import compute_depth_gaps
+    facts = await goal_fact_lines(session, person.id)
+    facts.extend(build_known_facts(identity=identity, sparse=sparse, typed=typed_records))
+    facts = _dedupe_goal_lines(facts)
+    raw_missing_critical = list(completion.get("missingCriticalFields") or [])
+    raw_missing_important = list(completion.get("missingImportantFields") or [])
+    raw_missing_enrichment = list(completion.get("missingEnrichmentFields") or [])
+    missing = _advice_gaps(raw_missing_critical)
+    from pai.intelligences.counselor.profile_depth import compute_depth_gaps
 
-        _highest = sparse.get("education.highest_level")
-        depth_gaps = compute_depth_gaps(
-            highest_level=_sparse_value(_highest) if _highest is not None else None,
-            educations=typed_records.get("educations") or [],
-            work_experiences=typed_records.get("workExperiences") or [],
-        )
-        _profile_cache[str(person.id)] = (
-            version,
-            {
-                "facts": facts,
-                "missing": missing,
-                "raw_missing_critical": raw_missing_critical,
-                "raw_missing_important": raw_missing_important,
-                "raw_missing_enrichment": raw_missing_enrichment,
-                "depth_gaps": depth_gaps,
-            },
-        )
+    _highest = sparse.get("education.highest_level")
+    depth_gaps = compute_depth_gaps(
+        highest_level=_sparse_value(_highest) if _highest is not None else None,
+        educations=typed_records.get("educations") or [],
+        work_experiences=typed_records.get("workExperiences") or [],
+    )
     recent: list[dict[str, str]] = []
     if conversation_id:
         result = await session.execute(
@@ -299,7 +253,7 @@ async def build_counselor_context(
                         intel = await get_goal_intelligence(session, active_goal.id)
                         if intel is not None and intel.counselor_brief:
                             active_goal_brief = intel.counselor_brief
-                            active_goal_status = intel.status
+                            active_goal_status = active_goal.intelligence_status or intel.status
                         else:
                             active_goal_status = active_goal.intelligence_status or "pending"
         except Exception:
@@ -340,6 +294,7 @@ async def build_counselor_context(
     )
     return CounselorContext(
         person_id=str(person.id),
+        discovery_candidates=[c.field_key for c in discovery.runners_up],
         identity=identity,
         goal=_fact_after(facts, "current goal"),
         education=_fact_after(facts, "education"),
@@ -374,6 +329,7 @@ def invalidate_counselor_cache(person_id: uuid.UUID | str) -> None:
 
 class PersonContextPack(BaseModel):
     person_id: str
+    discovery_candidates: list[str] = Field(default_factory=list)
     identity: dict[str, Any] = Field(default_factory=dict)
     applicable_vault_fields: dict[str, Any] = Field(default_factory=dict)
     typed_profile_summary: dict[str, Any] = Field(default_factory=dict)
@@ -472,8 +428,9 @@ def build_known_facts(
         ]
         detail = " / ".join(str(p) for p in parts) if parts else "education record"
         if edu.get("gpa") is not None:
-            scale = edu.get("gpaScale") or 4.0
-            detail += f", GPA/CGPA {edu['gpa']}/{scale}"
+            scale = edu.get("gpaScale")
+            detail += f", GPA/CGPA {edu['gpa']}"
+            detail += f"/{scale}" if scale is not None else " (scale unknown)"
         if edu.get("percentage") is not None:
             detail += f", {edu['percentage']}%"
         facts.append(f"Education: {detail}")

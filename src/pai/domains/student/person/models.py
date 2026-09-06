@@ -86,7 +86,8 @@ class Education(Base):
     person_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    institution: Mapped[str] = mapped_column(String(256), nullable=False)
+    institution: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    qualification_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     degree: Mapped[str | None] = mapped_column(String(128))
     major: Mapped[str | None] = mapped_column(String(128))
     start_date: Mapped[date | None] = mapped_column(Date)

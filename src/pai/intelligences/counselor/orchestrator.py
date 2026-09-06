@@ -50,7 +50,7 @@ from pai.platform.llm.gateway import LLMGateway
 
 logger = logging.getLogger(__name__)
 
-MAX_LLM_CALLS_PER_TURN = 2
+MAX_LLM_CALLS_PER_TURN = 3
 
 
 def _counselor_web_note(allow_web: bool, attachment_note: str = "") -> str:
@@ -183,6 +183,18 @@ class PAIOrchestrator:
             timed("context")(lambda: pack_task)(),
             timed("semantic_recall")(lambda: recall)(),
         )
+        from pai.intelligences.understanding.turn import understand_turn
+        understanding = await understand_turn(self._gateway, message=state["user_message"],
+            recent=pack.recent_messages, profile=pack.profile_block(),
+            candidates=pack.discovery_candidates)
+        state["turn_understanding"] = understanding
+        state["task_proposals"] = understanding.task_proposals
+        state["orchestration_llm_calls"] = (state.get("orchestration_llm_calls") or 0) + 1
+        pack.conversation_focus = understanding.focus
+        if understanding.question:
+            pack.conversation_focus += " Suggested question (use only if still appropriate): " + understanding.question
+        pack.top_discovery_candidate = understanding.question_field
+        state["discovery_question"] = understanding.question
         if self._memory:
             self._memory.hydrate_conversation(pack.recent_messages)
         if semantic:
@@ -233,6 +245,19 @@ class PAIOrchestrator:
     async def _extract_llm_only(self, state: PAIState) -> dict:
         pack = state.get("student_context")
         known_facts = list(getattr(pack, "known_facts", None) or [])
+        from pai.domains.goals.service import list_goals
+        goals = await list_goals(self._session, self._person.id)
+        from sqlalchemy import select
+        source = await self._session.get(Message, uuid.UUID(state["user_message_id"]))
+        if source is not None:
+            recent = (await self._session.execute(select(Message).where(
+                Message.conversation_id == source.conversation_id,
+                Message.created_at <= source.created_at
+            ).order_by(Message.created_at.desc()).limit(12))).scalars().all()
+            known_facts.append("Prior conversation is context, not new evidence: " + json.dumps(
+                [{"role": row.role, "content": row.content} for row in reversed(recent)], ensure_ascii=False))
+        known_facts.append("Existing owned goals (reference IDs only when the same pursuit): " +
+            json.dumps([{"id": str(g.id), "title": g.title, "anchors": g.anchors} for g in goals], ensure_ascii=False))
         candidates = await self._fact_agent.extract_from_chat(
             user_message=state["user_message"],
             user_message_id=state["user_message_id"],
@@ -303,8 +328,10 @@ class PAIOrchestrator:
         to_apply = []
         pending: list[PendingConfirmation] = []
         for r in state.get("candidate_results") or []:
-            if r.outcome in ("accept", "reinforce", "pending_confirmation"):
+            if r.outcome in ("accept", "reinforce"):
                 to_apply.append(r.candidate)
+            elif r.outcome in ("pending_confirmation", "conflict"):
+                to_apply.append(r.candidate.model_copy(update={"requires_confirmation": True}))
             if r.outcome == "pending_confirmation":
                 pending.append(
                     PendingConfirmation(
@@ -349,6 +376,7 @@ class PAIOrchestrator:
                 r.candidate
                 for r in results
                 if r.outcome in ("accept", "reinforce")
+                and any(change.field_key == r.candidate.field_key and change.status in ("accepted", "reinforced", "updated") for change in applied)
             ],
             pending=[
                 r.candidate for r in results if r.outcome == "pending_confirmation"
@@ -361,15 +389,9 @@ class PAIOrchestrator:
                 await apply_memory_drafts(self._session, self._person.id, drafts)
             except Exception:
                 logger.exception("Memory formation failed")
+                raise
         if to_apply or drafts:
-            await self._session.commit()
             invalidate_counselor_cache(self._person.id)
-            # After commit: embedding is an outbound HTTPS call and must not
-            # hold row locks. Failure here is non-fatal — the rows keep
-            # embedding NULL and are picked up next turn or by the backfill.
-            await embed_pending_memories(
-                get_session_factory(self._settings), self._person.id
-            )
         state["applied_vault_changes"] = applied
         state["pending_confirmations"] = pending
         if self._run:
@@ -411,7 +433,7 @@ class PAIOrchestrator:
             if hasattr(pack, "profile_block"):
                 profile_block = pack.profile_block()
             recent = list(getattr(pack, "recent_messages", None) or [])
-        allow_web = counselor_web_search_enabled(self._settings, state["user_message"])
+        allow_web = counselor_web_search_enabled(self._settings, state["user_message"], state.get("turn_understanding"))
         registry = build_turn_registry(
             enable_web_search=allow_web,
             enable_semantic_recall=False,  # already prefetched into semantic_ctx
@@ -479,6 +501,7 @@ class PAIOrchestrator:
                 state = await self.node_apply_vault_changes(state)
             except Exception:
                 logger.exception("Post-reply extraction failed")
+                raise
         return await self.node_process_tasks(state)
 
     async def iter_reply_tokens(self, state: PAIState):
@@ -488,7 +511,7 @@ class PAIOrchestrator:
         pack = state.get("student_context")
         profile_block = pack.profile_block() if pack is not None and hasattr(pack, "profile_block") else ""
         recent = list(getattr(pack, "recent_messages", None) or []) if pack is not None else []
-        allow_web = counselor_web_search_enabled(self._settings, state["user_message"])
+        allow_web = counselor_web_search_enabled(self._settings, state["user_message"], state.get("turn_understanding"))
         registry = build_turn_registry(
             enable_web_search=allow_web,
             enable_semantic_recall=False,
@@ -541,7 +564,7 @@ class PAIOrchestrator:
                 proposals,
                 conversation_id=uuid.UUID(state["conversation_id"]),
             )
-            await self._session.commit()
+            await self._session.flush()
             state["task_results"] = results
         if self._run:
             self._run.current_step = "save_assistant_message"
@@ -599,8 +622,8 @@ class PAIOrchestrator:
             )
             return True
         except Exception:
-            logger.exception("Goal resolver failed (non-fatal)")
-            return False
+            logger.exception("Goal resolver failed")
+            raise
 
     async def _record_discovery_question(self, state: PAIState) -> None:
         """Persist which gap was surfaced this turn (doc §7 Rule 7 — don't
@@ -612,7 +635,8 @@ class PAIOrchestrator:
         if not field_key or self._session is None:
             return
         reply = state.get("assistant_reply") or ""
-        if "?" not in reply:
+        question = state.get("discovery_question")
+        if not question or question.casefold() not in reply.casefold():
             return
         conversation_id = state.get("conversation_id")
         if not conversation_id:

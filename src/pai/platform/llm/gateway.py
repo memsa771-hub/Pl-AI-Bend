@@ -46,9 +46,9 @@ class LLMGateway:
             return self._settings.llm_goal_model
         if task == "complex_analysis":
             return self._settings.llm_complex_model
-        if task in ("extraction", "extract_facts", "fact_extraction"):
+        if task in ("extraction", "extract_facts", "fact_extraction", "turn_understanding"):
             return self._settings.llm_extraction_model
-        if task in ("document", "document_extract"):
+        if task in ("document", "document_extract", "document_classification"):
             return self._settings.llm_document_model
         if task in ("document_vision", "ocr"):
             return self._settings.llm_document_vision_model
@@ -76,7 +76,7 @@ class LLMGateway:
     def _max_tokens_for(self, task: str) -> int:
         if task in ("counseling", "student_conversation", "simple_conversation"):
             return int(self._settings.llm_counseling_max_tokens)
-        if task in ("document", "document_extract"):
+        if task in ("document", "document_extract", "document_classification"):
             return int(self._settings.document_vision_max_tokens)
         return 2048
 

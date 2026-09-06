@@ -141,7 +141,10 @@ async def analyze_goal(
     }
     summary = result.research.model_dump()
     summary["sources"] = research.get("sources", [])
+    summary["retrieved_at"] = research.get("retrieved_at")
     if research.get("_error"):
+        assessment["overall_fit"] = "unknown"
+        assessment["meets_requirements"] = {key: None for key in assessment["meets_requirements"]}
         # Keep unavailable evidence visibly unavailable, regardless of model output.
         summary = {
             **research,

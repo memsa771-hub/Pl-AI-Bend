@@ -134,15 +134,13 @@ async def chat_stream(
     user_text = user_msg.content
     run_id = run.id
 
-    async def events():
-        if counselor_web_search_enabled(settings, user_text):
-            yield _sse("status", {"phase": "research", "message": "Checking current information."})
+    async def events_body():
         factory = get_session_factory(settings)
         async with factory() as stream_session:
             row = await stream_session.execute(
                 select(Person)
                 .options(selectinload(Person.vault))
-                .where(Person.id == person_id)
+                .where(Person.id == person_id, Person.deleted_at.is_(None))
             )
             stream_person = row.scalar_one()
             orch = PAIOrchestrator(settings, gateway=gateway)
@@ -177,6 +175,8 @@ async def chat_stream(
                 "tool_trace": [],
             }
             state = await orch.node_load_student_context(state)
+            if getattr(state.get("turn_understanding"), "needs_research", None) is True:
+                yield _sse("status", {"phase": "research", "message": "Checking current information."})
             first_token = True
             async for delta in orch.iter_reply_tokens(state):
                 if delta and first_token:
@@ -222,6 +222,28 @@ async def chat_stream(
                 intelligence_pending=queued is not None,
             )
             yield _sse("done", done)
+
+    async def record_stream_failure(status):
+        from datetime import UTC, datetime
+        async with get_session_factory(settings)() as failure_session:
+            failed_run = await failure_session.get(OrchestrationRun, run_id)
+            if failed_run is not None and failed_run.status != "completed":
+                failed_run.status = status
+                failed_run.error_code = "STREAM_CANCELLED" if status == "cancelled" else "STREAM_FAILED"
+                failed_run.completed_at = datetime.now(UTC)
+                await failure_session.commit()
+
+    async def events():
+        import asyncio
+        try:
+            async for event in events_body():
+                yield event
+        except asyncio.CancelledError:
+            await asyncio.shield(record_stream_failure("cancelled"))
+            raise
+        except Exception:
+            await record_stream_failure("failed")
+            yield _sse("error", {"code": "STREAM_FAILED", "message": "The reply was interrupted. Please retry."})
 
     return StreamingResponse(
         events(),

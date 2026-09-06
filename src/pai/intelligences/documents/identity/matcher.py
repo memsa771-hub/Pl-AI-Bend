@@ -28,6 +28,7 @@ def match_student(
         if left and right:
             if left != right:
                 return "mismatch"
-            if name_status in set(policy().get("unconfirmed_identity") or ()):
+            # Matching DOB alone does not establish document ownership.
+            if name_status == "matched":
                 return "matched"
     return name_status

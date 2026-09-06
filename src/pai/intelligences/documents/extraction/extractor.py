@@ -38,14 +38,6 @@ async def extract_candidates(
     known_facts: list[str],
     person_id: str,
 ) -> list[VaultCandidate]:
-    typed = await _try_typed(
-        gateway,
-        document_text=document_text,
-        document_type=document_type,
-        document_id=document_id,
-    )
-    if typed:
-        return typed
     try:
         agent = FactExtractionAgent(gateway)
         fallback = await agent.extract_from_document(
@@ -58,7 +50,7 @@ async def extract_candidates(
         return [row for row in fallback if evidence_grounded(row.evidence_text, document_text)]
     except Exception:
         logger.exception("Omnibus document extract failed type=%s", document_type)
-        return []
+        raise
 
 
 async def _try_typed(

@@ -112,6 +112,8 @@ async def save_user_message(
     verify_owner: bool = True,
     commit: bool = True,
 ) -> Message:
+    from pai.domains.student.person.write_lock import lock_person
+    await lock_person(session, person.id)
     if verify_owner:
         await get_conversation_owned(session, person.id, conversation_id)
     msg = Message(
@@ -168,6 +170,8 @@ async def save_assistant_message(
     model: str | None,
     update_title: bool = True,
 ) -> Message:
+    from pai.domains.student.person.write_lock import lock_person
+    await lock_person(session, person.id)
     msg = Message(
         conversation_id=conversation_id,
         person_id=person.id,

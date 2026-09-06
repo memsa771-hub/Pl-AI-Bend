@@ -49,7 +49,9 @@ def _education_payload(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
 
-    out: dict[str, Any] = {}
+    out: dict[str, Any] = {"qualification_data": dict(value)}
+    if value.get("id"):
+        out["id"] = str(value["id"])
     institution = value.get("institution")
     degree = value.get("degree") or value.get("program") or value.get("qualification")
     major = value.get("major") or value.get("stream") or value.get("group")
@@ -61,8 +63,12 @@ def _education_payload(value: Any) -> dict[str, Any] | None:
     if major is not None and str(major).strip():
         out["major"] = str(major).strip()
 
+    from pai.domains.student.normalization.grades import finite_number
     if value.get("gpa") is not None:
-        out["gpa"] = float(value["gpa"])
+        number = finite_number(value["gpa"])
+        if number is None:
+            return None
+        out["gpa"] = number
     elif value.get("value") is not None and not institution:
         try:
             out["gpa"] = float(value["value"])
@@ -80,8 +86,8 @@ def _education_payload(value: Any) -> dict[str, Any] | None:
     if value.get("status") is not None:
         out["status"] = str(value["status"])
 
-    marks_obtained = value.get("marks_obtained") or value.get("obtained")
-    marks_total = value.get("marks_total") or value.get("total")
+    marks_obtained = value.get("marks_obtained", value.get("obtained"))
+    marks_total = value.get("marks_total", value.get("total"))
     marks = value.get("marks")
     if marks is not None and marks_obtained is None:
         if isinstance(marks, str) and _MARKS_RE.match(marks):
@@ -114,57 +120,33 @@ async def _find_education_match(
     person_id: uuid.UUID,
     payload: dict[str, Any],
 ) -> Education | None:
-    institution = payload.get("institution")
-    if institution:
-        result = await session.execute(
-            select(Education).where(
-                Education.person_id == person_id,
-                Education.institution == institution,
-            )
-        )
-        hit = result.scalar_one_or_none()
-        if hit:
-            return hit
-
-    degree = payload.get("degree")
-    major = payload.get("major")
-    if degree or major:
-        result = await session.execute(
-            select(Education)
-            .where(Education.person_id == person_id)
-            .order_by(Education.updated_at.desc())
-        )
-        for row in result.scalars().all():
-            deg_ok = not degree or (row.degree or "").lower() == str(degree).lower()
-            maj_ok = not major or (row.major or "").lower() == str(major).lower()
-            inst_ok = not institution or (row.institution or "").lower() == str(institution).lower()
-            if deg_ok and maj_ok and (inst_ok or not institution):
-                if degree or major:
-                    return row
-
-    # Bare GPA/percentage correction against single/most-recent education
-    if payload.get("gpa") is not None or payload.get("percentage") is not None:
-        result = await session.execute(
-            select(Education)
-            .where(Education.person_id == person_id)
-            .order_by(Education.updated_at.desc())
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
-    return None
+    result = await session.execute(select(Education).where(Education.person_id == person_id))
+    rows = list(result.scalars().all())
+    record_id = payload.get("id")
+    if record_id:
+        return next((row for row in rows if str(row.id) == str(record_id)), None)
+    identity = [(key, payload.get(key)) for key in ("institution", "degree", "major", "graduation_year") if payload.get(key) is not None]
+    if not identity:
+        return rows[0] if len(rows) == 1 else None
+    matches = [row for row in rows if all(
+        str(getattr(row, key) or "").casefold() == str(value).casefold() for key, value in identity)]
+    if len(matches) > 1:
+        payload["_ambiguous_identity"] = True
+    return matches[0] if len(matches) == 1 else None
 
 
 def _apply_education_fields(row: Education, payload: dict[str, Any]) -> None:
-    if payload.get("institution") and row.institution != payload["institution"]:
-        # Keep established institution unless it was a placeholder equal to degree
-        if row.institution in (row.degree, row.major, None, ""):
-            row.institution = payload["institution"]
+    if payload.get("institution"):
+        row.institution = payload["institution"]
     if payload.get("degree"):
         row.degree = payload["degree"]
     if payload.get("major"):
         row.major = payload["major"]
+    if payload.get("qualification_data"):
+        row.qualification_data = {**(row.qualification_data or {}), **payload["qualification_data"]}
     if payload.get("gpa") is not None:
         row.gpa = payload["gpa"]
+        row.gpa_scale = payload.get("gpa_scale")
     if payload.get("gpa_scale") is not None:
         row.gpa_scale = payload["gpa_scale"]
     if payload.get("percentage") is not None:
@@ -182,6 +164,8 @@ def _education_snapshot(row: Education) -> dict[str, Any]:
         "degree": row.degree,
         "major": row.major,
         "gpa": row.gpa,
+        "gpa_scale": row.gpa_scale,
+        "qualification_data": row.qualification_data,
         "percentage": row.percentage,
         "graduation_year": row.graduation_year,
     }
@@ -215,60 +199,6 @@ async def _log_typed_history(
     )
 
 
-async def _upsert_career_goal(
-    session: AsyncSession,
-    person: Person,
-    title: str,
-    *,
-    vault_status: str,
-) -> tuple[Goal, str, dict[str, Any] | None]:
-    """Keep one canonical career goal; update instead of duplicating."""
-    normalized = title.strip().lower()
-    result = await session.execute(
-        select(Goal)
-        .where(Goal.person_id == person.id)
-        .order_by(Goal.updated_at.desc())
-    )
-    rows = list(result.scalars().all())
-    for row in rows:
-        if row.title.strip().lower() == normalized:
-            return row, "reinforced", _goal_snap(row)
-        # Soft match: same program acronym inside title (BSCS / BS CS)
-        if normalized in row.title.lower() or row.title.lower() in normalized:
-            old = _goal_snap(row)
-            row.title = title[:256]
-            row.status = "active" if vault_status != "pending" else row.status
-            return row, "updated", old
-
-    if rows:
-        # Single career objective: update the newest rather than spawn duplicates
-        row = rows[0]
-        old = _goal_snap(row)
-        row.title = title[:256]
-        row.status = "active" if vault_status != "pending" else "proposed"
-        return row, "updated", old
-
-    from pai.domains.goals.service import (
-        LIFECYCLE_ACTIVE,
-        LIFECYCLE_DRAFT,
-        activate_goal,
-        create_goal,
-    )
-    from pai.domains.goals.types import GoalType
-
-    status = LIFECYCLE_ACTIVE if vault_status != "pending" else LIFECYCLE_DRAFT
-    goal = await create_goal(
-        session,
-        person.id,
-        title=title[:256],
-        goal_type=GoalType.GENERAL.value,
-        anchors={},
-        lifecycle_status=status,
-    )
-    if status == LIFECYCLE_ACTIVE:
-        await activate_goal(session, goal)
-    return goal, "accepted", None
-
 
 def _as_items(value: Any) -> list[Any]:
     if value is None:
@@ -286,8 +216,8 @@ def _parse_date(value: Any) -> date | None:
     if isinstance(value, date):
         return value
     text = str(value).strip()
-    if len(text) == 7 and text[4] == "-":
-        text = f"{text}-01"
+    if len(text) != 10:
+        return None
     try:
         return date.fromisoformat(text[:10])
     except ValueError:
@@ -307,6 +237,11 @@ async def _apply_education_one(
     vault_status: str,
     recompute_completion: bool,
 ) -> TypedApplyResult:
+    if vault_status == "pending":
+        from pai.kernel.evidence.vault_apply import apply_vault_candidate
+        result = await apply_vault_candidate(session, person, candidate, vault_status="pending",
+            verification_level="self_reported", recompute_completion=recompute_completion)
+        return TypedApplyResult(result.field_key, result.status, result.confidence)
     payload = _education_payload(candidate.value)
     if payload is None and field.key in ("education.gpa", "education.program"):
         if isinstance(candidate.value, (int, float)):
@@ -333,27 +268,28 @@ async def _apply_education_one(
 
     existing = await _find_education_match(session, person.id, payload)
     old_snapshot = _education_snapshot(existing) if existing else None
-    institution = (payload.get("institution") or "").strip()
-    invented = institution in (payload.get("degree"), payload.get("major"))
+    invalid_identity = bool(payload.get("_ambiguous_identity") or (payload.get("id") and existing is None))
     if existing:
-        if invented:
-            payload = {k: v for k, v in payload.items() if k != "institution"}
         _apply_education_fields(existing, payload)
         row = existing
         status = "updated"
-    elif not institution or invented:
-        return TypedApplyResult(candidate.field_key, "rejected", candidate.confidence)
+    elif invalid_identity or not any(payload.get(k) for k in ("institution", "degree", "major")):
+        from pai.kernel.evidence.vault_apply import apply_vault_candidate
+        result = await apply_vault_candidate(session, person, candidate, vault_status="pending",
+            verification_level="self_reported", recompute_completion=False)
+        return TypedApplyResult(result.field_key, result.status, result.confidence)
     else:
         row = Education(
             person_id=person.id,
-            institution=payload["institution"],
+            institution=payload.get("institution"),
+            qualification_data=payload.get("qualification_data"),
             degree=payload.get("degree"),
             major=payload.get("major"),
             gpa=payload.get("gpa"),
             gpa_scale=payload.get("gpa_scale"),
             percentage=payload.get("percentage"),
             graduation_year=payload.get("graduation_year"),
-            status=payload.get("status") or "completed",
+            status=payload.get("status") or "unknown",
         )
         session.add(row)
         await session.flush()
@@ -596,23 +532,35 @@ async def apply_typed_candidate(
     vault_status: str,
     recompute_completion: bool = True,
 ) -> TypedApplyResult:
+    if vault_status == "pending":
+        from pai.kernel.evidence.vault_apply import apply_vault_candidate
+        result = await apply_vault_candidate(session, person, candidate, vault_status="pending",
+            verification_level="self_reported", recompute_completion=recompute_completion)
+        return TypedApplyResult(result.field_key, result.status, result.confidence)
+
     if field.storage == "educations":
         items = _as_items(candidate.value) if isinstance(candidate.value, list) else None
         if items:
-            last = TypedApplyResult(candidate.field_key, "rejected", candidate.confidence)
-            for item in items:
-                piece = candidate.model_copy(update={"value": item})
-                last = await _apply_education_one(
-                    session,
-                    person,
-                    piece,
-                    field,
-                    vault_status=vault_status,
-                    recompute_completion=False,
-                )
+            statuses = []
+            async with session.begin_nested() as batch:
+                for item in items:
+                    result = await _apply_education_one(session, person,
+                        candidate.model_copy(update={"value": item}), field,
+                        vault_status=vault_status, recompute_completion=False)
+                    statuses.append(result.status)
+                if any(status in ("pending", "rejected") for status in statuses):
+                    await batch.rollback()
+                    if person.vault:
+                        await session.refresh(person.vault)
+            if any(status in ("pending", "rejected") for status in statuses):
+                from pai.kernel.evidence.vault_apply import apply_vault_candidate
+                result = await apply_vault_candidate(session, person, candidate,
+                    vault_status="pending", verification_level="self_reported",
+                    recompute_completion=recompute_completion)
+                return TypedApplyResult(result.field_key, result.status, result.confidence)
             if recompute_completion and person.vault:
                 await apply_completion_to_vault(session, person, person.vault)
-            return last
+            return TypedApplyResult(candidate.field_key, "accepted", candidate.confidence)
         return await _apply_education_one(
             session,
             person,
@@ -621,54 +569,6 @@ async def apply_typed_candidate(
             vault_status=vault_status,
             recompute_completion=recompute_completion,
         )
-
-    if field.storage == "goals" and field.key == "application.career_interest":
-        title = candidate.value if isinstance(candidate.value, str) else str(candidate.value)
-        # Delegate to GoalService so multi-goal logic is respected
-        try:
-            from pai.domains.goals.service import (
-                INTEL_PENDING,
-                INTEL_STALE,
-                enqueue_goal_intelligence_job,
-                upsert_goal_from_anchors,
-            )
-            from pai.domains.goals.types import GoalType, GoalWriteAction
-
-            goal, action = await upsert_goal_from_anchors(
-                session,
-                person.id,
-                goal_type=GoalType.GENERAL.value,
-                title=title,
-                anchors={"title": title[:256]},
-                activate=(vault_status != "pending"),
-                create_if_new=True,
-            )
-            if goal is not None and (
-                action != GoalWriteAction.REINFORCE
-                or goal.intelligence_status in (INTEL_PENDING, INTEL_STALE)
-            ):
-                await enqueue_goal_intelligence_job(session, goal)
-            old = _goal_snap(goal) if goal is not None else None
-            status = action
-        except Exception:
-            import logging as _log
-            _log.getLogger(__name__).exception("GoalService upsert failed; falling back to legacy")
-            goal, status, old = await _upsert_career_goal(
-                session, person, title, vault_status=vault_status
-            )
-        await expand_scope_for_person(session, person, SCOPE_BY_RESOURCE["goals"])
-        await _log_typed_history(
-            session,
-            person,
-            candidate.field_key,
-            old_value=old,
-            new_value=_goal_snap(goal),
-            candidate=candidate,
-        )
-        if recompute_completion and person.vault:
-            await apply_completion_to_vault(session, person, person.vault)
-        out = "pending" if vault_status == "pending" else status
-        return TypedApplyResult(candidate.field_key, out, candidate.confidence)
 
     if field.storage == "skills":
         status = await _upsert_skills(session, person, _as_items(candidate.value), candidate)

@@ -1,27 +1,26 @@
-from __future__ import annotations
-
-import re
+"""Parse only dates whose order and precision are explicit or unambiguous."""
 from datetime import date
+import re
 from typing import Any
 
-_ISO = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
-_DMY = re.compile(r"^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$")
-
-
 def parse_date(value: Any) -> str | None:
-    if value is None:
-        return None
     if isinstance(value, date):
         return value.isoformat()
-    text = str(value).strip()
-    if match := _ISO.match(text):
-        return date(int(match[1]), int(match[2]), int(match[3])).isoformat()
-    if match := _DMY.match(text):
-        day, month, year = int(match[1]), int(match[2]), int(match[3])
-        if month > 12 and day <= 12:
-            day, month = month, day
-        try:
-            return date(year, month, day).isoformat()
-        except ValueError:
-            return None
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            return date.fromisoformat(text).isoformat()
+        match = re.fullmatch(r"(\d{1,2})[./-](\d{1,2})[./-](\d{4})", text)
+        if match:
+            a, b, year = map(int, match.groups())
+            if a > 12 >= b:
+                return date(year, b, a).isoformat()
+            if b > 12 >= a:
+                return date(year, a, b).isoformat()
+            if a == b:
+                return date(year, a, b).isoformat()
+    except ValueError:
+        pass
     return None

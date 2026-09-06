@@ -1,147 +1,47 @@
-"""Conversation stance: deterministic counselor posture per turn (no LLM)."""
+"""Semantic interpretation owns posture; deterministic fallback never guesses."""
+from unittest.mock import AsyncMock
+import pytest
+from pai.intelligences.counselor.conversation_stance import compute_stance
+from pai.intelligences.understanding.schemas import TurnUnderstanding
+from pai.intelligences.understanding.turn import understand_turn
 
-from __future__ import annotations
+@pytest.mark.parametrize("message", ["My father supports me", "I feel uncertain", "میرا ارادہ بدل گیا", "我想换专业"])
+def test_fallback_does_not_infer_posture_from_words(message):
+    result = compute_stance(message=message, turn_kind="PERSONAL_ADVICE",
+        is_greeting=False, has_active_goal=True)
+    assert result.phase == "answer"
 
-from pai.intelligences.counselor.conversation_stance import (
-    ConversationStance,
-    compute_stance,
-)
+@pytest.mark.asyncio
+async def test_semantic_intervention_uses_original_language_and_context():
+    gateway = AsyncMock()
+    gateway.run.return_value = TurnUnderstanding(stance="explore", intervention="ask",
+        focus="Clarify the student's own preference.", question="آپ کیا چاہتے ہیں؟",
+        question_field="career.projects", evidence="میرا ارادہ بدل گیا")
+    result = await understand_turn(gateway, message="میرا ارادہ بدل گیا", recent=[],
+        profile="Existing goal", candidates=["career.projects"])
+    assert result.stance == "explore"
+    assert result.question_field == "career.projects"
+    assert "میرا ارادہ بدل گیا" in gateway.run.call_args.kwargs["messages"][1].content
 
+@pytest.mark.asyncio
+async def test_ungrounded_understanding_fails_to_neutral():
+    gateway = AsyncMock()
+    gateway.run.return_value = TurnUnderstanding(evidence="invented")
+    result = await understand_turn(gateway, message="hello", recent=[], profile="", candidates=[])
+    assert result.status == "unavailable"
+    assert result.question is None
 
-def _phase(**kwargs) -> str:
-    base = dict(
-        message="",
-        turn_kind="PERSONAL_ADVICE",
-        is_greeting=False,
-        has_active_goal=False,
-    )
-    base.update(kwargs)
-    return compute_stance(**base).phase
+@pytest.mark.asyncio
+async def test_unavailable_model_does_not_invent_intervention():
+    gateway = AsyncMock()
+    gateway.run.side_effect = RuntimeError("unavailable")
+    result = await understand_turn(gateway, message="help", recent=[], profile="", candidates=[])
+    assert result.status == "unavailable"
 
-
-def test_greeting_is_answer():
-    assert _phase(message="hi", is_greeting=True) == "answer"
-
-
-def test_factual_live_research_is_answer_even_with_goal():
-    assert (
-        _phase(
-            message="What is the IELTS requirement for TUM?",
-            turn_kind="LIVE_RESEARCH",
-            has_active_goal=True,
-            active_goal_status="ready",
-            prior_assistant_turns=5,
-        )
-        == "answer"
-    )
-
-
-def test_uncertain_user_without_goal_explores():
-    assert (
-        _phase(message="I want to study abroad but I have no idea where")
-        == "explore"
-    )
-
-
-def test_confident_new_direction_without_goal_is_understand():
-    assert (
-        _phase(message="I want to do an MS in CS in Germany. I've decided.")
-        == "understand"
-    )
-
-
-def test_profile_update_without_goal_is_understand():
-    assert _phase(message="I scored 7.5 on IELTS", turn_kind="PROFILE_UPDATE") == "understand"
-
-
-def test_plain_question_without_goal_is_answer():
-    assert (
-        _phase(message="Can you tell me how counseling here works?")
-        == "answer"
-    )
-
-
-def test_confident_user_with_new_goal_is_understand_not_guide():
-    # Goal exists but intelligence not ready yet -> understand before executing.
-    assert (
-        _phase(
-            message="Let's plan it",
-            has_active_goal=True,
-            active_goal_status="pending",
-            prior_assistant_turns=1,
-        )
-        == "understand"
-    )
-
-
-def test_established_goal_with_intelligence_guides():
-    assert (
-        _phase(
-            message="Okay what next for my applications",
-            has_active_goal=True,
-            active_goal_status="ready",
-            prior_assistant_turns=4,
-        )
-        == "guide"
-    )
-
-
-def test_ready_goal_but_too_early_still_understands():
-    # Intelligence ready but only the opening exists -> not yet guiding.
-    assert (
-        _phase(
-            message="tell me more",
-            has_active_goal=True,
-            active_goal_status="ready",
-            prior_assistant_turns=1,
-        )
-        == "understand"
-    )
-
-
-def test_new_uncertainty_about_existing_goal_pulls_back_to_understand():
-    assert (
-        _phase(
-            message="Honestly I'm not sure Germany is right for me anymore",
-            has_active_goal=True,
-            active_goal_status="ready",
-            prior_assistant_turns=6,
-        )
-        == "understand"
-    )
-
-
-def test_peer_pressure_with_goal_is_understand():
-    assert (
-        _phase(
-            message="My parents want me to do an MBA",
-            has_active_goal=True,
-            active_goal_status="ready",
-            prior_assistant_turns=4,
-            decision_signal=True,
-        )
-        == "understand"
-    )
-
-
-def test_focus_text_is_populated_for_every_phase():
-    cases = (
-        dict(message="hi", turn_kind="PERSONAL_ADVICE", is_greeting=True, has_active_goal=False),
-        dict(message="no idea where to go", turn_kind="PERSONAL_ADVICE", is_greeting=False, has_active_goal=False),
-        dict(message="I want to study in Germany", turn_kind="PERSONAL_ADVICE", is_greeting=False, has_active_goal=False),
-        dict(
-            message="what next",
-            turn_kind="PERSONAL_ADVICE",
-            is_greeting=False,
-            has_active_goal=True,
-            active_goal_status="ready",
-            prior_assistant_turns=3,
-        ),
-    )
-    seen_phases = set()
-    for kwargs in cases:
-        stance = compute_stance(**kwargs)
-        assert isinstance(stance, ConversationStance)
-        assert stance.focus and len(stance.focus) > 10
-        seen_phases.add(stance.phase)
-    assert seen_phases == {"answer", "explore", "understand", "guide"}
+@pytest.mark.asyncio
+async def test_unrecognized_candidate_cannot_be_written_to_discovery_tracking():
+    gateway = AsyncMock()
+    gateway.run.return_value = TurnUnderstanding(intervention="ask", question="Why?",
+        question_field="invented.field", evidence="help")
+    result = await understand_turn(gateway, message="help", recent=[], profile="", candidates=[])
+    assert result.question_field is None

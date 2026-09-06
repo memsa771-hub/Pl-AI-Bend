@@ -6,8 +6,19 @@ from pai.kernel.evidence.assertion import assertion_of
 
 
 def validate_candidate(candidate: VaultCandidate) -> VaultCandidate | None:
+    from pai.kernel.evidence.assertion import is_vault_eligible
+    if not is_vault_eligible(candidate):
+        return None
     if candidate.field_key == OBSERVED_FIELD_KEY:
         return None
+    if candidate.field_key == "education.gpa":
+        from pai.domains.student.normalization.grades import parse_grade
+        parsed = parse_grade(candidate.value)
+        if parsed is None:
+            return None
+        candidate = candidate.model_copy(update={"value": parsed,
+            "requires_confirmation": candidate.requires_confirmation or
+                (parsed["requires_confirmation"] and candidate.source_type != "manual")})
     field = get_catalog_field(candidate.field_key)
     if field is None or field.derived or not field.editable:
         return None

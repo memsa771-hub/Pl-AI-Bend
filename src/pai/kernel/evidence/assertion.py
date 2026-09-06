@@ -30,6 +30,8 @@ def assertion_of(candidate: VaultCandidate) -> str:
 
 
 def is_vault_eligible(candidate: VaultCandidate) -> bool:
+    if candidate.temporal_status in ("future", "unknown"):
+        return False
     if candidate.field_key == OBSERVED_FIELD_KEY:
         return False
     if (candidate.fact_type or "").strip().upper() == "OTHER_POTENTIAL_FACT":
@@ -51,7 +53,7 @@ def format_observed(candidate: VaultCandidate) -> str:
         else json.dumps(candidate.value, default=str)
     )
     kind = candidate.fact_type or candidate.field_key
-    parts = [f"Observed ({status}, {kind}): {fact}"]
+    parts = [f"Observed ({status}, temporal={candidate.temporal_status}, {kind}): {fact}"]
     if who.lower() not in _STUDENT:
         parts.append(f"attributed_to={who}")
     evidence = (candidate.evidence_text or "").strip()

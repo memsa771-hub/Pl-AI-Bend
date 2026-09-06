@@ -23,7 +23,7 @@ from pai.platform.latency import LatencyMiddleware, request_id
 )
 async def test_normal_turns_never_call_tool_decision(test_settings, message, research):
     settings = test_settings.model_copy(update={"tavily_api_key": "test"})
-    enabled = counselor_web_search_enabled(settings, message)
+    enabled = counselor_web_search_enabled(settings, message, understanding=SimpleNamespace(needs_research=research))
     assert enabled is research
     if research:
         return
@@ -55,7 +55,7 @@ async def test_context_and_recall_still_overlap(test_settings, monkeypatch):
     async def context(*args, **kwargs):
         context_started.set()
         await asyncio.wait_for(recall_started.wait(), 1)
-        return SimpleNamespace(recent_messages=[], profile_block=lambda: "profile")
+        return SimpleNamespace(recent_messages=[], discovery_candidates=[], profile_block=lambda: "profile")
 
     async def recall(*args):
         recall_started.set()
@@ -68,6 +68,9 @@ async def test_context_and_recall_still_overlap(test_settings, monkeypatch):
     monkeypatch.setattr("pai.intelligences.counselor.orchestrator.build_counselor_context", context)
     monkeypatch.setattr("pai.domains.documents.service.attachment_note_for_message", attachment)
     orch = object.__new__(PAIOrchestrator)
+    from unittest.mock import AsyncMock
+    from pai.intelligences.understanding.schemas import TurnUnderstanding
+    orch._gateway = SimpleNamespace(run=AsyncMock(return_value=TurnUnderstanding()))
     orch._session = object()
     orch._person = object()
     orch._settings = test_settings
@@ -135,8 +138,8 @@ async def test_worker_isolation(test_settings, fake_provider, monkeypatch, embed
 @pytest.mark.parametrize(
     "message,task",
     [
-        ("Hi!", "simple_conversation"),
-        ("Thanks", "simple_conversation"),
+        ("Hi!", "student_conversation"),
+        ("Thanks", "student_conversation"),
         ("Yes", "student_conversation"),
         ("Hi, I need a career plan", "student_conversation"),
     ],

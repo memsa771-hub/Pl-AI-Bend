@@ -12,7 +12,7 @@ from pai.config import Settings
 from pai.kernel.gates import accept_vault_candidates
 from pai.platform.llm.gateway import LLMGateway
 from pai.kernel.contracts.schemas import VaultCandidate
-from pai.intelligences.documents.classification.classifier import classify_document
+from pai.intelligences.documents.classification.classifier import classify_content
 from pai.intelligences.documents.classification.taxonomy import default_type, evidence_eligible
 from pai.intelligences.documents.config import policy, taxonomy as di_taxonomy
 from pai.intelligences.documents.digitization.service import digitize_bytes
@@ -94,9 +94,9 @@ async def _existing_belief(session: AsyncSession, person: Person, field_key: str
         if raw is None:
             return None
         scale_col = spec.get("scale_column")
-        scale = getattr(row, str(scale_col), None) if scale_col else 4.0
+        scale = getattr(row, str(scale_col), None) if scale_col else None
         if spec.get("shape") == "cumulative_gpa":
-            return {"value": float(raw), "scale": float(scale or 4.0), "type": "cumulative"}
+            return {"value": float(raw), "scale": float(scale) if scale is not None else None, "type": "cumulative"}
         return raw
     vault_id = await session.scalar(select(PersonVault.id).where(PersonVault.person_id == person.id))
     if vault_id is None:
@@ -125,7 +125,7 @@ async def run_document_analysis(
         job.last_error = "document missing"
         return
     person = await session.scalar(
-        select(Person).where(Person.id == doc.person_id).options(selectinload(Person.vault))
+        select(Person).where(Person.id == doc.person_id, Person.deleted_at.is_(None)).options(selectinload(Person.vault))
     )
     if person is None:
         job.status = "failed"
@@ -172,14 +172,8 @@ async def run_document_analysis(
 
         _mark_stage(run, job, "classify", doc)
         filename = version.original_filename if version else doc.original_filename
-        prior = doc.document_type
-        hint = None if prior in set(di_taxonomy().get("generated_types") or ()) else prior
-        classified = classify_document(
-            filename=filename or "",
-            hint=hint,
-            source_type=doc.source_type,
-            text=text[: int(rules.get("classify_text_chars") or 4000)],
-        )
+        classified = await classify_content(gateway, source_type=doc.source_type,
+            text=text[: int(rules.get("classify_text_chars") or 4000)])
         doc.document_type = classified["document_type"]
         doc.category = classified["category"]
         doc.base_criticality = classified["base_criticality"]

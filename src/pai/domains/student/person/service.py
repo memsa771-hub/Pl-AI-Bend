@@ -127,6 +127,8 @@ class PersonBootstrapService:
         external_id = str(provider_user.id)
         person = await self._find_person(session, AUTH_PROVIDER_NAME, external_id)
         if person is not None:
+            from pai.domains.student.person.write_lock import lock_person
+            person = await lock_person(session, person.id)
             dirty = self._sync_identity(person, provider_user)
             vault = person.vault
             # Login is auth + person flags. Catalog grow is a cheap column write;
@@ -184,12 +186,14 @@ class PersonBootstrapService:
             .where(
                 Person.auth_provider == provider,
                 Person.external_auth_id == external_id,
-                Person.deleted_at.is_(None),
             )
             .with_for_update()
         )
         result = await session.execute(stmt)
-        return result.scalar_one_or_none()
+        person = result.scalar_one_or_none()
+        if person is not None and person.deleted_at is not None:
+            raise PersonNotFoundError("Account deletion is in progress.")
+        return person
 
     async def _get_vault_for_update(
         self, session: AsyncSession, person_id: uuid.UUID
@@ -333,6 +337,8 @@ async def update_person_profile(
     expected_version: int,
     updates: dict[str, Any],
 ) -> Person:
+    from pai.domains.student.person.write_lock import lock_person
+    person = await lock_person(session, person.id)
     if person.version != expected_version:
         raise VersionConflictError()
     allowed = {"full_name", "preferred_name", "phone"}
@@ -343,38 +349,51 @@ async def update_person_profile(
     await session.flush()
     if person.vault:
         await apply_completion_to_vault(session, person, person.vault)
+    from pai.domains.goals.service import mark_intelligence_stale_for_vault_update
+    await mark_intelligence_stale_for_vault_update(session, person.id, "identity")
     await session.commit()
     return person
 
 
 async def soft_delete_person_data(session: AsyncSession, person: Person) -> None:
-    """Mark person deleted and purge vault values before auth deletion."""
-    async with session.begin():
-        person.account_status = "deleted"
-        person.deleted_at = datetime.now(UTC)
-        person.email = f"deleted-{person.id}@anonymous.local"
-        person.full_name = None
-        person.preferred_name = None
-        person.phone = None
-        person.onboarding_completed_at = None
-        person.onboarding_path = None
-        person.version += 1
-        for model in (
-            Education,
-            WorkExperience,
-            Project,
-            Skill,
-            Certification,
-            Goal,
-            PersonConsent,
-        ):
-            await session.execute(delete(model).where(model.person_id == person.id))
-        if person.vault:
-            await session.execute(
-                delete(VaultValue).where(VaultValue.vault_id == person.vault.id)
-            )
-            await session.execute(
-                delete(VaultHistory).where(VaultHistory.vault_id == person.vault.id)
-            )
-            person.vault.applicable_scopes = []
-            person.vault.version += 1
+    """Durably fence the account, remove objects, then purge owned application data.
+
+    Document rows survive failed object deletion, so retries retain every path.
+    The minimal tombstone retains the auth ID to permit retrying identity deletion.
+    """
+    from pai.domains.documents.models import Document, DocumentVersion
+    from pai.platform.storage.supabase import SupabaseStorageProvider
+    from pai.platform.database.base import Base
+    import pai.domains.actions.models
+    import pai.domains.memory.models
+    import pai.domains.journey.models
+    import pai.domains.conversations.models
+    import pai.platform.jobs.models
+
+    person = (await session.execute(select(Person).where(Person.id == person.id)
+        .with_for_update().execution_options(populate_existing=True))).scalar_one()
+    person.account_status = "deleted"
+    person.deleted_at = person.deleted_at or datetime.now(UTC)
+    person.email = f"deleted-{person.id}@anonymous.local"
+    person.full_name = person.preferred_name = person.phone = None
+    person.onboarding_completed_at = person.onboarding_path = None
+    person.version += 1
+    await session.commit()
+
+    paths = set((await session.execute(select(Document.storage_path).where(
+        Document.person_id == person.id))).scalars().all())
+    paths.update((await session.execute(select(DocumentVersion.storage_path).join(
+        Document, Document.id == DocumentVersion.document_id).where(
+        Document.person_id == person.id))).scalars().all())
+    if paths:
+        storage = SupabaseStorageProvider(get_settings())
+        try:
+            for path in paths:
+                await storage.delete_object(path)
+        finally:
+            await storage.aclose()
+    # All descendants are deleted through owned roots and their declared FK cascades.
+    for table in reversed(Base.metadata.sorted_tables):
+        if table.name != "persons" and "person_id" in table.c:
+            await session.execute(delete(table).where(table.c.person_id == person.id))
+    await session.commit()

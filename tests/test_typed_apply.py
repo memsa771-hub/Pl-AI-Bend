@@ -40,6 +40,7 @@ async def test_education_gpa_typed_apply(postgres_ready):
                 "institution": "Bahria University",
                 "degree": "BS Computer Science",
                 "gpa": 3.4,
+                "scale": 4,
             },
             confidence=0.92,
             evidence_text="BS Computer Science from Bahria University with a 3.4 CGPA",
@@ -61,7 +62,7 @@ async def test_education_gpa_typed_apply(postgres_ready):
 
         correction = VaultCandidate(
             field_key="education.gpa",
-            value={"institution": "Bahria University", "gpa": 3.6},
+            value={"institution": "Bahria University", "gpa": 3.6, "scale": 4},
             confidence=0.95,
             evidence_text="Correction, my final CGPA is 3.6.",
             source_reference=str(uuid.uuid4()),

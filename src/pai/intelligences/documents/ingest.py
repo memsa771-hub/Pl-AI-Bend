@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +35,7 @@ async def create_document_upload(
     document_type: str | None = None,
     created_by: str = "student",
     title: str | None = None,
+    inline_processing: bool = False,
 ) -> Document:
     mime = validate_upload_bytes(filename, content_type, data, settings)
     await scan_bytes(data, filename=filename, settings=settings)
@@ -44,53 +46,62 @@ async def create_document_upload(
     policy = "extract" if eligible else "disabled"
     doc_id = uuid.uuid4()
     version_id = uuid.uuid4()
-    path = f"{person.id}/{doc_id}/{version_id}/{filename}"
+    path = f"{person.id}/{doc_id}/{version_id}/original"
+    from pai.domains.student.person.write_lock import lock_person
+    await lock_person(session, person.id)
     await storage.upload_private(path, data, mime)
-    digest = hashlib.sha256(data).hexdigest()
-    doc = Document(
-        id=doc_id,
-        person_id=person.id,
-        title=(title or filename)[:256],
-        document_type=classified["document_type"],
-        category=classified["category"],
-        source_type=source,
-        created_by=actor,
-        base_criticality=classified["base_criticality"],
-        evidence_eligible=eligible,
-        vault_extraction_policy=policy,
-        trust_level=classified["trust_level"],
-        storage_path=path,
-        original_filename=filename,
-        mime_type=mime,
-        size_bytes=len(data),
-        status="uploaded",
-        lifecycle_status="draft" if source == "ai_generated" else "active",
-    )
-    session.add(doc)
-    await session.flush()
-    version = DocumentVersion(
-        id=version_id,
-        document_id=doc.id,
-        version_number=1,
-        storage_path=path,
-        original_filename=filename,
-        mime_type=mime,
-        size_bytes=len(data),
-        sha256=digest,
-        created_by=actor,
-    )
-    session.add(version)
-    await session.flush()
-    doc.current_version_id = version.id
-    session.add(
-        DocumentJob(
-            document_id=doc.id,
-            document_version_id=version.id,
+    try:
+        digest = hashlib.sha256(data).hexdigest()
+        doc = Document(
+            id=doc_id,
             person_id=person.id,
-            idempotency_key=f"extract-{version.id}",
-            status="pending",
+            title=(title or filename)[:256],
+            document_type=classified["document_type"],
+            category=classified["category"],
+            source_type=source,
+            created_by=actor,
+            base_criticality=classified["base_criticality"],
+            evidence_eligible=eligible,
+            vault_extraction_policy=policy,
+            trust_level=classified["trust_level"],
+            storage_path=path,
+            original_filename=filename,
+            mime_type=mime,
+            size_bytes=len(data),
+            status="uploaded",
+            lifecycle_status="draft" if source == "ai_generated" else "active",
         )
-    )
-    await session.commit()
+        session.add(doc)
+        await session.flush()
+        version = DocumentVersion(
+            id=version_id,
+            document_id=doc.id,
+            version_number=1,
+            storage_path=path,
+            original_filename=filename,
+            mime_type=mime,
+            size_bytes=len(data),
+            sha256=digest,
+            created_by=actor,
+        )
+        session.add(version)
+        await session.flush()
+        doc.current_version_id = version.id
+        session.add(
+            DocumentJob(
+                document_id=doc.id,
+                document_version_id=version.id,
+                person_id=person.id,
+                idempotency_key=f"extract-{version.id}",
+                status="processing" if inline_processing else "pending",
+                attempts=1 if inline_processing else 0,
+                locked_at=datetime.now(UTC) if inline_processing else None,
+            )
+        )
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        await storage.delete_object(path)
+        raise
     await session.refresh(doc)
     return doc

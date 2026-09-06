@@ -49,6 +49,8 @@ async def create_resource(
     person: Person,
     data: dict[str, Any],
 ) -> Any:
+    from pai.domains.student.person.write_lock import lock_person
+    await lock_person(session, person.id)
     row = model(person_id=person.id, **data)
     session.add(row)
     await session.flush()
@@ -63,6 +65,8 @@ async def create_resource(
         await expand_scope_for_person(session, person, "mobility")
     if person.vault:
         await apply_completion_to_vault(session, person, person.vault)
+    from pai.domains.goals.service import mark_intelligence_stale_for_vault_update
+    await mark_intelligence_stale_for_vault_update(session, person.id, model.__tablename__)
     await session.commit()
     return row
 
@@ -74,6 +78,8 @@ async def update_resource(
     resource_id: uuid.UUID,
     data: dict[str, Any],
 ) -> Any:
+    from pai.domains.student.person.write_lock import lock_person
+    await lock_person(session, person.id)
     result = await session.execute(
         select(model).where(model.id == resource_id, model.person_id == person.id)
     )
@@ -86,6 +92,8 @@ async def update_resource(
     await session.flush()
     if person.vault:
         await apply_completion_to_vault(session, person, person.vault)
+    from pai.domains.goals.service import mark_intelligence_stale_for_vault_update
+    await mark_intelligence_stale_for_vault_update(session, person.id, model.__tablename__)
     await session.commit()
     return row
 
@@ -96,6 +104,8 @@ async def delete_resource(
     person: Person,
     resource_id: uuid.UUID,
 ) -> None:
+    from pai.domains.student.person.write_lock import lock_person
+    await lock_person(session, person.id)
     result = await session.execute(
         select(model).where(model.id == resource_id, model.person_id == person.id)
     )
@@ -105,6 +115,8 @@ async def delete_resource(
     await session.delete(row)
     if person.vault:
         await apply_completion_to_vault(session, person, person.vault)
+    from pai.domains.goals.service import mark_intelligence_stale_for_vault_update
+    await mark_intelligence_stale_for_vault_update(session, person.id, model.__tablename__)
     await session.commit()
 
 

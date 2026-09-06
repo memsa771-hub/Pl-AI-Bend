@@ -128,7 +128,12 @@ class VaultService:
         if expected_version is not None and vault.version != expected_version:
             raise VersionConflictError()
 
-        async with session.begin():
+        from pai.domains.student.person.write_lock import lock_person
+        await lock_person(session, person.id)
+        await session.refresh(vault)
+        if expected_version is not None and vault.version != expected_version:
+            raise VersionConflictError()
+        async with session.begin_nested():
             result = await session.execute(
                 select(VaultValue).where(
                     VaultValue.vault_id == vault.id,
@@ -177,6 +182,9 @@ class VaultService:
             await self._maybe_expand_scopes(session, vault, field.applicable_scope)
             await apply_completion_to_vault(session, person, vault)
 
+        from pai.domains.goals.service import mark_intelligence_stale_for_vault_update
+        await mark_intelligence_stale_for_vault_update(session, person.id, field_key)
+        await session.commit()
         return await self.get_field(session, person, field_key, include_sensitive=True)
 
     async def delete_field(
@@ -197,7 +205,12 @@ class VaultService:
             return
         if expected_version is not None and vault.version != expected_version:
             raise VersionConflictError()
-        async with session.begin():
+        from pai.domains.student.person.write_lock import lock_person
+        await lock_person(session, person.id)
+        await session.refresh(vault)
+        if expected_version is not None and vault.version != expected_version:
+            raise VersionConflictError()
+        async with session.begin_nested():
             result = await session.execute(
                 select(VaultValue).where(
                     VaultValue.vault_id == vault.id,
@@ -221,6 +234,9 @@ class VaultService:
                 )
             )
             await apply_completion_to_vault(session, person, vault)
+        from pai.domains.goals.service import mark_intelligence_stale_for_vault_update
+        await mark_intelligence_stale_for_vault_update(session, person.id, field_key)
+        await session.commit()
 
     async def get_field(
         self,
@@ -384,6 +400,8 @@ class VaultService:
         skip_consent_check: bool = False,
     ) -> None:
         """Write many vault_value fields in one select + one flush, then evidence rows."""
+        from pai.domains.student.person.write_lock import lock_person
+        await lock_person(session, person.id)
         if not items:
             return
         vault = person.vault

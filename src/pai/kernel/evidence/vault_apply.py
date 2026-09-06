@@ -67,7 +67,7 @@ async def apply_vault_candidate(
             field_key=candidate.field_key, status="reinforced", confidence=candidate.confidence
         )
     old_val = existing.value if existing else None
-    if existing:
+    if existing and vault_status != "pending":
         existing.status = "superseded"
     status = "pending_confirmation" if vault_status == "pending" else "active"
     row = VaultValue(
@@ -120,6 +120,8 @@ async def process_candidates(
     already_reconciled: bool = False,
     apply_order: list[str] | None = None,
 ) -> tuple[list[VaultApplyResult], list[VaultCandidate]]:
+    from pai.domains.student.person.write_lock import lock_person
+    await lock_person(session, person.id)
     accepted: list[VaultApplyResult] = []
     pending: list[VaultCandidate] = []
     mutated = False
@@ -144,7 +146,7 @@ async def process_candidates(
         if decision == "pending":
             pending.append(candidate)
 
-        if field.storage == "vault_value":
+        if field.storage == "vault_value" or vault_status == "pending":
             if vault_status == "pending":
                 await apply_vault_candidate(
                     session,
@@ -183,6 +185,8 @@ async def process_candidates(
             vault_status=vault_status,
             recompute_completion=False,
         )
+        if typed.status == "pending":
+            pending.append(candidate)
         if typed.status != "rejected":
             accepted.append(
                 VaultApplyResult(
@@ -201,12 +205,11 @@ async def process_candidates(
         record_vault_applied(session, person.id, applied_keys)
 
         # Selective goal refresh: re-queue assessment for goals affected by these fields.
-        # Include pending typed writes too — work/projects/certs are stored even when
-        # pending, and gaps must refresh when the profile changes.
+        # Only accepted truth can invalidate a goal assessment.
         refresh_keys = list(
             dict.fromkeys(
                 [
-                    *[row.field_key for row in accepted],
+                    *[row.field_key for row in accepted if row.status != "pending"],
                 ]
             )
         )
@@ -218,6 +221,7 @@ async def process_candidates(
         except Exception:
             import logging as _logging
             _logging.getLogger(__name__).exception(
-                "Goal selective refresh failed (non-fatal) for person=%s", person.id
+                "Goal selective refresh failed for person=%s", person.id
             )
+            raise
     return accepted, pending

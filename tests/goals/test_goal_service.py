@@ -72,7 +72,7 @@ def test_anchor_match_same_country_degree():
     goal = _make_goal(goal_type="admission", target_country="DE", degree_level="ms")
     anchors = {"goal_type": "admission", "target_country": "DE", "degree_level": "ms"}
     score = _anchor_match_score(goal, anchors)
-    assert score >= 0.6
+    assert score == 0.0  # Shared anchors do not prove the same pursuit.
 
 
 def test_anchor_match_different_country():

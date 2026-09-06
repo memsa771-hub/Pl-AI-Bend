@@ -29,9 +29,9 @@ async def _delete_person(session, person: Person) -> None:
 
 
 def test_classify_resume_from_filename():
-    assert classify_from_name("Musawir-CV-2027.pdf") == "resume"
-    assert classify_from_name("official-transcript.pdf") == "transcript"
-    assert classify_from_name("ielts-trf.pdf") == "ielts"
+    assert classify_from_name("Musawir-CV-2027.pdf") == "other"
+    assert classify_from_name("official-transcript.pdf") == "other"
+    assert classify_from_name("ielts-trf.pdf") == "other"
     assert classify_from_name("notes.pdf") == "other"
     assert classify_from_name("file.pdf", "sop") == "sop"
 

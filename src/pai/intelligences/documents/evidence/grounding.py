@@ -13,12 +13,12 @@ def fold_span(value: str | None) -> str:
 
 
 def compact_span(value: str | None) -> str:
-    return _ALNUM.sub("", (value or "").casefold())
+    return "".join(ch for ch in (value or "").casefold() if ch.isalnum())
 
 
 def evidence_grounded(span: str | None, document_text: str | None) -> bool:
     needle, hay = fold_span(span), fold_span(document_text)
-    if len(needle) < 4 or not hay:
+    if not needle or not hay:
         return False
     if needle in hay:
         return True

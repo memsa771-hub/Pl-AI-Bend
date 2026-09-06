@@ -355,7 +355,7 @@ def _fields() -> tuple[CatalogField, ...]:
             priority="I",
             sensitive=False,
             derived=False,
-            storage="goals",
+            storage="vault_value",
             applicable_scope="application",
             value_type="string",
             editable=True,

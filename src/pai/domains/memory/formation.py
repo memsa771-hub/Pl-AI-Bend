@@ -47,6 +47,7 @@ class MemoryDraft:
     confidence: float
     importance: float
     assertion_status: str
+    source_references: list[str] = field(default_factory=list)
     evidence: str = ""
     belongs_to: str = "profile"
     related: list[str] = field(default_factory=list)
@@ -67,6 +68,7 @@ class MemoryRecord:
     stability: float
     evidence_count: int
     assertion_status: str
+    source_references: list[str] = field(default_factory=list)
     evidence: str = ""
     belongs_to: str = "profile"
     related: list[str] = field(default_factory=list)
@@ -78,6 +80,10 @@ class MemoryRecord:
 
 def memory_key_for(candidate: VaultCandidate) -> str:
     if is_vault_eligible(candidate):
+        catalog = get_catalog_field(candidate.field_key)
+        if catalog and catalog.repeatable:
+            body = json.dumps(candidate.value, sort_keys=True, ensure_ascii=False, default=str)
+            return f"semantic:{candidate.field_key}:" + hashlib.sha256(body.encode()).hexdigest()[:24]
         return f"semantic:{candidate.field_key}"
     who = (candidate.attributed_to or "student").strip().lower() or "student"
     body = candidate.value
@@ -118,7 +124,7 @@ def drafts_from_turn(
         if draft is not None:
             drafts.append(draft)
     for row in pending or []:
-        draft = _draft_from_candidate(row, status="candidate", kind=_kind_for(row))
+        draft = _draft_from_candidate(row, status="candidate", kind=_kind_for(row), key_prefix="pending")
         if draft is not None:
             drafts.append(draft)
     for row in conflicts or []:
@@ -157,20 +163,19 @@ def apply_draft(
     incoming = _record_from_draft(draft, now=stamp)
     if existing is None:
         return "insert", incoming, None
+    if draft.source_references and set(draft.source_references) <= set(existing.source_references):
+        return "noop", existing, None
     if _norm(existing.content) == _norm(draft.content):
         recurrence = existing.recurrence + 1
         status = existing.status
-        if recurrence >= 3 and status == "candidate":
-            status = "active"
-        if draft.assertion_status == "explicit" and draft.confidence >= 0.9:
-            status = "active" if existing.status != "superseded" else status
-        if existing.status == "active":
+        if draft.status == "active" and existing.status != "superseded":
             status = "active"
         updated = replace(
             existing,
-            confidence=min(0.99, max(existing.confidence, draft.confidence) + 0.05),
+            confidence=max(existing.confidence, draft.confidence),
             importance=max(existing.importance, draft.importance),
             recurrence=recurrence,
+            source_references=list(dict.fromkeys([*existing.source_references, *draft.source_references])),
             stability=min(0.95, 1.0 - 1.0 / (recurrence + 1)),
             evidence_count=existing.evidence_count + 1,
             last_confirmed_at=stamp,
@@ -414,6 +419,7 @@ def record_from_row(row: SemanticMemoryRow) -> MemoryRecord:
         evidence_count=int(blob.get("evidence_count", 1)),
         assertion_status=str(blob.get("assertion_status") or "explicit"),
         evidence=str(blob.get("evidence") or ""),
+        source_references=list(blob.get("source_references") or []),
         belongs_to=str(blob.get("belongs_to") or "profile"),
         related=[str(x) for x in related],
         previous_content=blob.get("previous_content"),
@@ -448,6 +454,7 @@ def _draft_from_candidate(
         importance=importance,
         assertion_status=assertion_of(candidate),
         evidence=(candidate.evidence_text or "")[:400],
+        source_references=[candidate.source_reference] if candidate.source_reference else [],
         belongs_to=_belongs_to(candidate.field_key),
         field_key=candidate.field_key,
         value=candidate.value,
@@ -461,6 +468,8 @@ def _kind_for(candidate: VaultCandidate) -> str:
 
 
 def _observed_status(candidate: VaultCandidate) -> str:
+    if candidate.temporal_status in ("future", "unknown"):
+        return "candidate"
     status = assertion_of(candidate)
     if status in ("hypothetical", "uncertain"):
         return "candidate"
@@ -507,6 +516,7 @@ def _record_from_draft(draft: MemoryDraft, *, now: datetime) -> MemoryRecord:
         evidence_count=1,
         assertion_status=draft.assertion_status,
         evidence=draft.evidence,
+        source_references=list(draft.source_references),
         belongs_to=draft.belongs_to,
         related=list(draft.related),
         field_key=draft.field_key,
@@ -575,6 +585,7 @@ def _formation_blob(record: MemoryRecord) -> dict[str, Any]:
         "recurrence": record.recurrence,
         "stability": record.stability,
         "evidence_count": record.evidence_count,
+        "source_references": record.source_references,
         "belongs_to": record.belongs_to,
         "related": record.related,
         "previous_content": record.previous_content,
@@ -585,8 +596,11 @@ def _formation_blob(record: MemoryRecord) -> dict[str, Any]:
 
 
 def _slug(text: str, n: int = 48) -> str:
-    token = _SLUG.sub("_", (text or "").lower()).strip("_")
-    return (token[:n] or "fact")
+    import unicodedata
+    normalized = unicodedata.normalize("NFKC", text or "").casefold()
+    token = "".join(ch if ch.isalnum() else "_" for ch in normalized).strip("_")
+    digest = hashlib.sha256(normalized.encode()).hexdigest()[:16]
+    return (token[:n] or "fact") + ":" + digest
 
 
 def _norm(value: str) -> str:

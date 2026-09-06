@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 
 from pai.intelligences.documents.config import policy, taxonomy
 from pai.intelligences.documents.digitization.schemas import DigitizationResult
@@ -24,11 +25,11 @@ class NativeDocumentProvider:
             )
         pages: list[dict] = []
         if mime == "application/pdf" or (filename or "").lower().endswith(".pdf"):
-            page_texts = pdf_page_texts(data)
+            page_texts = await asyncio.to_thread(pdf_page_texts, data)
             pages = [{"page": i + 1, "text": part} for i, part in enumerate(page_texts)]
             text = "\n\n".join(part for part in page_texts if part).strip()[:MAX_CHARS]
         else:
-            text = extract_text_from_bytes(data, mime, filename)
+            text = await asyncio.to_thread(extract_text_from_bytes, data, mime, filename)
             if text.strip():
                 pages = [{"page": 1, "text": text}]
         quality = "good" if len(text.strip()) >= int(policy()["min_text_chars"]) else "unreadable"

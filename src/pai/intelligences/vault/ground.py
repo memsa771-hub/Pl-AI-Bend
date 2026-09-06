@@ -14,7 +14,7 @@ def _fold(text: str) -> str:
 def evidence_in_source(evidence: str, source: str) -> bool:
     ev = _fold(evidence)
     src = _fold(source)
-    if len(ev) < 3:
+    if not ev:
         return False
     return ev in src
 

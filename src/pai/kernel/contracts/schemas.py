@@ -26,6 +26,7 @@ class VaultCandidate(BaseModel):
     explicitness: Explicitness = "explicit"
     assertion_status: AssertionStatus = "explicit"
     attributed_to: str | None = None
+    temporal_status: Literal["current", "past", "future", "unknown"] = "current"
     fact_type: str | None = None
     source_type: Literal[
         "chat", "document", "manual", "auth", "system", "linkedin", "social"
@@ -114,6 +115,8 @@ class GoalExtract(BaseModel):
             "none = greeting, question, or no new direction"
         ),
     )
+    existing_goal_id: str | None = None
+    anchors: dict[str, Any] = Field(default_factory=dict)
     stated: bool = False
     intent: str | None = None
     mode: Literal["pursuing", "exploring"] | None = None
