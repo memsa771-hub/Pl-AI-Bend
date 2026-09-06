@@ -68,7 +68,7 @@ async def create_document_upload(
             original_filename=filename,
             mime_type=mime,
             size_bytes=len(data),
-            status="uploaded",
+            status="ready" if source == "ai_generated" else "uploaded",
             lifecycle_status="draft" if source == "ai_generated" else "active",
         )
         session.add(doc)

@@ -166,18 +166,12 @@ class PAIOrchestrator:
 
     async def node_load_student_context(self, state: PAIState) -> PAIState:
         assert self._session and self._person
-        async def _no_recall() -> str:
-            return ""
-
-        recall = (
-            _no_recall()
-            if is_greeting(state["user_message"]) or not self._memory
-            else self._memory.recall(state["user_message"])
-        )
         async def bounded_recall() -> str:
+            if is_greeting(state["user_message"]) or not self._memory:
+                return ""
             try:
                 async with asyncio.timeout(self._settings.memory_recall_budget_seconds):
-                    return await timed("semantic_recall")(lambda: recall)()
+                    return await timed("semantic_recall")(lambda: self._memory.recall(state["user_message"]))()
             except Exception:
                 logger.info("Memory recall unavailable within chat budget")
                 return ""

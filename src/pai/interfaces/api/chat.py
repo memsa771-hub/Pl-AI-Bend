@@ -175,7 +175,7 @@ async def chat_stream(
                 "tool_trace": [],
             }
             state = await orch.node_load_student_context(state)
-            if getattr(state.get("turn_understanding"), "needs_research", None) is True:
+            if getattr(state.get("turn_understanding"), "research_state", "unknown") == "required":
                 yield _sse("status", {"phase": "research", "message": "Checking current information."})
             first_token = True
             async for delta in orch.iter_reply_tokens(state):

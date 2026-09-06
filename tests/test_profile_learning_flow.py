@@ -69,7 +69,9 @@ def test_education_payload_keeps_marks_and_rejects_orphan_gpa_fabrication():
     assert "institution" not in payload
     assert "Primary education" not in str(payload)
     as_degree = _education_payload("FSc Pre-Medical")
-    assert as_degree == {"degree": "FSc Pre-Medical"}
+    assert as_degree["degree"] == "FSc Pre-Medical"
+    assert as_degree["qualification_data"]["original_name"] == "FSc Pre-Medical"
+    assert as_degree["qualification_data"]["canonical_level"] is None
 
 
 @pytest.mark.asyncio

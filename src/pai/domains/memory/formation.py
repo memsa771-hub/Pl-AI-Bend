@@ -27,15 +27,7 @@ logger = logging.getLogger(__name__)
 
 Action = Literal["insert", "strengthen", "supersede", "noop"]
 
-_SLUG = re.compile(r"[^a-z0-9]+")
 _LIVE = ("active", "candidate")
-# Unverified claims stay recallable but rank below settled Vault truth.
-_CLAIM_RANK_PENALTY = 0.5
-# How much of a vector-search score is "does this answer the question" versus
-# "is this a settled, important fact". Measured against labelled queries on real
-# memories: at 0.40 the structural half dominated and one high-importance memory
-# won everything; 0.60 tripled top-1 hits.
-_SEMANTIC_RELEVANCE_WEIGHT = 0.60
 
 
 @dataclass
@@ -223,7 +215,7 @@ def rank_score(
     now: datetime | None = None,
     semantic_similarity: float | None = None,
 ) -> float:
-    """Blend relevance with how settled a memory is.
+    """Rank by query relevance; preserve truth status in the displayed memory.
 
     `semantic_similarity` is cosine similarity from vector search (0..1, higher
     is closer in meaning). When present it replaces word overlap: those rows

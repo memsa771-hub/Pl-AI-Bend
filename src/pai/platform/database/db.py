@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 import certifi
 from sqlalchemy import text
+from sqlalchemy.pool import NullPool
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from pai.config import Settings, get_settings
@@ -56,8 +57,7 @@ def get_engine(settings: Settings | None = None):
             # Remote pooler: skip pre-ping (extra RTT) and recycle idle sockets.
             pool_pre_ping=testing or not remote,
             pool_recycle=180 if remote else -1,
-            pool_size=3 if testing else 5,
-            max_overflow=0 if testing else 10,
+            **({"poolclass": NullPool} if testing else {"pool_size": 5, "max_overflow": 10}),
             connect_args=_engine_connect_args(
                 settings.database_url, ssl_verify=settings.database_ssl_verify
             ),

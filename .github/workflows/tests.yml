@@ -30,6 +30,8 @@ jobs:
           python-version: "3.12"
       - run: cp .env.example .env
       - run: uv sync --locked --all-extras
+      - name: Generate disposable encryption key
+        run: uv run python -c "from cryptography.fernet import Fernet; print('VAULT_ENCRYPTION_KEY=' + Fernet.generate_key().decode())" >> "$GITHUB_ENV"
       - name: Ruff correctness checks
         run: uv run ruff check src --select F821,F822,F823,F811,F841
       - name: Migration smoke

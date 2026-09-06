@@ -16,14 +16,6 @@ from pai.platform.latency import record, span
 
 logger = logging.getLogger(__name__)
 
-# Floor for rescaled similarity: the least-close candidate of a set is still a
-# vector-search hit, so it must not score as though it were unrelated.
-# Measured against scripts/eval_memory_recall.py: 0.0 scores a lone candidate as
-# irrelevant, 0.25 compresses the range enough to cost top-3 accuracy. 0.10 holds
-# top-3 at its best while keeping the degenerate case safe.
-_RESCALE_FLOOR = 0.10
-
-
 class AsyncPostgresMemoryStore:
     """Async Postgres store used by PersonMemoryService (AgentSpan-compatible entries)."""
 
@@ -62,8 +54,7 @@ class AsyncPostgresMemoryStore:
         settings = self._settings or get_settings()
         scored_rows = await self._vector_candidates(query, settings)
         if scored_rows is not None:
-            # Vector search narrowed by meaning; structural signals
-            # (importance / stability / recency / claim penalty) still decide order.
+            # Preserve relevance order unless the configured neural reranker succeeds.
             entries = _rank_entries(query, scored_rows, settings.embedding_candidate_limit, mode=mode, semantic=True)
             from pai.domains.memory.rerank import rerank
             return await rerank(query, entries, top_k, settings)
