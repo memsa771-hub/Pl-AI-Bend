@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from conftest import ONBOARDING_PAYLOAD
+from tests.conftest import ONBOARDING_PAYLOAD
 from pydantic import ValidationError
 
 from pai.workflows.onboarding.catalog import field_enum_catalog
