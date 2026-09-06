@@ -1,0 +1,23 @@
+# Uses the same external PostgreSQL/Supabase settings from .env for every process.
+x-pai: &pai
+  build: .
+  env_file: .env
+  environment:
+    RUN_WORKERS_IN_API: "false"
+  restart: unless-stopped
+  stop_grace_period: 40s
+
+services:
+  api:
+    <<: *pai
+    ports:
+      - "8000:8000"
+  intelligence-worker:
+    <<: *pai
+    command: ["python", "-m", "pai.interfaces.workers", "intelligence"]
+  goal-worker:
+    <<: *pai
+    command: ["python", "-m", "pai.interfaces.workers", "goals"]
+  document-worker:
+    <<: *pai
+    command: ["python", "-m", "pai.interfaces.workers", "documents"]
