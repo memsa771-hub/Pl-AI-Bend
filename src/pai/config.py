@@ -127,6 +127,10 @@ class Settings(BaseSettings):
     enable_graph_checkpoint: bool = Field(default=False, alias="ENABLE_GRAPH_CHECKPOINT")
 
     enable_rate_limits: bool = Field(default=True, alias="ENABLE_RATE_LIMITS")
+    rate_limit_fail_closed: bool = Field(default=False, alias="RATE_LIMIT_FAIL_CLOSED")
+    rate_limit_backend_timeout_seconds: float = Field(
+        default=1.0, gt=0, le=5, alias="RATE_LIMIT_BACKEND_TIMEOUT_SECONDS"
+    )
     request_limit_per_minute: int = Field(default=120, gt=0, alias="REQUEST_LIMIT_PER_MINUTE")
     user_request_limit_per_minute: int = Field(default=60, gt=0, alias="USER_REQUEST_LIMIT_PER_MINUTE")
     upload_limit_per_day: int = Field(default=30, gt=0, alias="UPLOAD_LIMIT_PER_DAY")

@@ -1,6 +1,8 @@
 """Atomic database-backed limits shared by API processes and background workers."""
 import asyncio
 import hashlib
+import logging
+import time
 from contextvars import ContextVar
 from datetime import UTC, datetime
 
@@ -9,6 +11,8 @@ from pai.kernel.errors import AuthError
 from pai.platform.database.db import get_session_factory
 
 usage_subject = ContextVar("usage_subject", default="background")
+logger = logging.getLogger(__name__)
+_last_backend_warning = 0.0
 
 class LimitExceeded(AuthError):
     def __init__(self, retry_after):
@@ -27,7 +31,7 @@ async def consume(settings, items):
     if not enabled(settings):
         return
     try:
-        async with asyncio.timeout(2):
+        async with asyncio.timeout(settings.rate_limit_backend_timeout_seconds):
             async with get_session_factory(settings)() as session:
                 now = float((await session.execute(text("SELECT extract(epoch FROM clock_timestamp())"))).scalar_one())
                 for namespace, subject, cost, limit, window in sorted(items, key=lambda item: (item[0], str(item[1]), item[4])):
@@ -47,7 +51,22 @@ async def consume(settings, items):
     except AuthError:
         raise
     except Exception as exc:
-        raise AuthError(code="LIMITS_UNAVAILABLE", message="Service temporarily unavailable.", status_code=503) from exc
+        global _last_backend_warning
+        now = time.monotonic()
+        if now - _last_backend_warning >= 60:
+            _last_backend_warning = now
+            logger.error(
+                "Rate-limit backend unavailable; %s request (%s)",
+                "blocking" if settings.rate_limit_fail_closed else "allowing",
+                type(exc).__name__,
+                exc_info=True,
+            )
+        if settings.rate_limit_fail_closed:
+            raise AuthError(
+                code="LIMITS_UNAVAILABLE",
+                message="Service temporarily unavailable.",
+                status_code=503,
+            ) from exc
 
 async def reserve_llm(settings, request, *, subject=None):
     if not enabled(settings):

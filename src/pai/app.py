@@ -187,6 +187,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health_live() -> JSONResponse:
         return JSONResponse(content=success({"status": "live"}))
 
+    @app.get("/", include_in_schema=False)
+    async def service_root() -> JSONResponse:
+        return JSONResponse(
+            content=success(
+                {
+                    "service": "Placement AI (PAI)",
+                    "status": "live",
+                    "docs": "/docs" if docs_enabled else None,
+                    "readiness": "/health/ready",
+                }
+            )
+        )
+
     @app.get(
         "/health/ready",
         tags=["health"],

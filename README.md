@@ -149,7 +149,11 @@ per-user upload, LLM call and token reservation limits in `.env.example`. Failed
 model requests keep their reservations to bound retries; these counters are
 conservative reservations, not provider billing totals. The peer address is used
 for anonymous rate limits: configure trusted proxy handling at the ASGI server,
-and never trust arbitrary forwarded headers. Test environments disable counters.
+and never trust arbitrary forwarded headers. Counter-backend failures allow the
+request by default so a slow database cannot take down every route; readiness and
+rate-limited error logs expose the fault. Set `RATE_LIMIT_FAIL_CLOSED=true` only
+when rejecting traffic during a counter outage is the intended policy. Test
+environments disable counters.
 
 Goal analysis freshness records supplied input keys and row IDs. Legacy results
 without an input manifest are invalidated conservatively. Empty inputs are recorded
