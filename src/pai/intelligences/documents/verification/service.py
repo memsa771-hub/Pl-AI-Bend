@@ -41,6 +41,23 @@ async def open_case(
     reason_code: str,
     severity: str = "high",
 ) -> VerificationCase:
+    existing = await session.scalar(
+        select(VerificationCase).where(
+            VerificationCase.person_id == person_id,
+            VerificationCase.document_id == document_id,
+            VerificationCase.field_key == field_key,
+            VerificationCase.case_type == case_type,
+            VerificationCase.status.in_(("open", "presented")),
+        )
+    )
+    if existing is not None:
+        existing.incoming_document_fact_id = fact.id if fact is not None else None
+        existing.existing_value = existing_value
+        existing.incoming_value = incoming_value
+        existing.reason_code = reason_code
+        existing.severity = severity
+        existing.status = "open"
+        return existing
     row = VerificationCase(
         person_id=person_id,
         document_id=document_id,

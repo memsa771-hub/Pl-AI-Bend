@@ -34,6 +34,7 @@ class Document(Base):
     document_type: Mapped[str | None] = mapped_column(String(64))
     category: Mapped[str] = mapped_column(String(32), default="other", nullable=False)
     source_type: Mapped[str] = mapped_column(String(32), default="document_vault", nullable=False)
+    origin: Mapped[str] = mapped_column(String(32), default="user_uploaded", nullable=False)
     created_by: Mapped[str] = mapped_column(String(16), default="student", nullable=False)
     base_criticality: Mapped[str] = mapped_column(String(16), default="normal", nullable=False)
     evidence_eligible: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -76,6 +77,7 @@ class DocumentVersion(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str | None] = mapped_column(String(64))
     content_text: Mapped[str | None] = mapped_column(Text)
+    structured_extraction: Mapped[dict | None] = mapped_column(JSONB)
     created_by: Mapped[str] = mapped_column(String(16), default="student", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -217,6 +219,9 @@ class DocumentAnalysisRun(Base):
     current_stage: Mapped[str] = mapped_column(String(32), default="security", nullable=False)
     completed_stages: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     digitization: Mapped[dict | None] = mapped_column(JSONB)
+    structured_payload: Mapped[dict | None] = mapped_column(JSONB)
+    schema_version: Mapped[str | None] = mapped_column(String(64))
+    structured_document_type: Mapped[str | None] = mapped_column(String(64))
     provider_artifact_path: Mapped[str | None] = mapped_column(String(512))
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime] = mapped_column(

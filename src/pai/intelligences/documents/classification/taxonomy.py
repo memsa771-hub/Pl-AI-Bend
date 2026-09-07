@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from pai.intelligences.documents.config import policy, taxonomy
 
 
@@ -16,10 +14,6 @@ def default_type() -> str:
 def type_meta(document_type: str) -> dict:
     types = taxonomy()["types"]
     return dict(types.get(document_type) or types[default_type()])
-
-
-def _generated_types() -> set[str]:
-    return set(taxonomy().get("generated_types") or ())
 
 
 def _usable_hint(hint: str | None) -> str | None:
@@ -38,7 +32,7 @@ def evidence_eligible(*, source_type: str, document_type: str) -> bool:
     rules = policy()
     if source_type in set(rules.get("generated_sources") or []):
         return False
-    blocked = set(taxonomy().get("generated_types") or []) | set(rules.get("evidence_ineligible_types") or [])
+    blocked = set(rules.get("evidence_ineligible_types") or [])
     return document_type not in blocked
 
 

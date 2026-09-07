@@ -19,6 +19,12 @@ from pai.intelligences.documents.extraction.schemas import transcript as transcr
 
 logger = logging.getLogger(__name__)
 
+
+class DocumentExtractionResult(BaseModel):
+    structured_payload: dict
+    candidates: list[VaultCandidate]
+
+
 # Schema modules stay in code; which type uses which schema lives in taxonomy.json.
 _SCHEMAS: dict[str, tuple[type[BaseModel], object]] = {
     "passport": (passport_schema.PassportExtraction, passport_schema.to_field_map),
@@ -37,7 +43,24 @@ async def extract_candidates(
     document_type: str,
     known_facts: list[str],
     person_id: str,
-) -> list[VaultCandidate]:
+) -> DocumentExtractionResult:
+    typed = await _try_typed(
+        gateway,
+        document_text=document_text,
+        document_type=document_type,
+        document_id=document_id,
+    )
+    if typed is not None:
+        extracted, candidates = typed
+        return DocumentExtractionResult(
+            structured_payload=_structured_envelope(
+                document_id=document_id,
+                document_type=document_type,
+                extraction=extracted.model_dump(exclude_none=True),
+                candidates=candidates,
+            ),
+            candidates=candidates,
+        )
     try:
         agent = FactExtractionAgent(gateway)
         fallback = await agent.extract_from_document(
@@ -47,7 +70,21 @@ async def extract_candidates(
             known_facts=known_facts,
             person_id=person_id,
         )
-        return [row for row in fallback if evidence_grounded(row.evidence_text, document_text)]
+        grounded = [row for row in fallback if evidence_grounded(row.evidence_text, document_text)]
+        return DocumentExtractionResult(
+            structured_payload=_structured_envelope(
+                document_id=document_id,
+                document_type=document_type,
+                extraction={
+                    "facts": [
+                        {"field": row.field_key, "value": row.value}
+                        for row in grounded
+                    ]
+                },
+                candidates=grounded,
+            ),
+            candidates=grounded,
+        )
     except Exception:
         logger.exception("Omnibus document extract failed type=%s", document_type)
         raise
@@ -59,10 +96,10 @@ async def _try_typed(
     document_text: str,
     document_type: str,
     document_id: str,
-) -> list[VaultCandidate]:
+) -> tuple[BaseModel, list[VaultCandidate]] | None:
     spec = _SCHEMAS.get(str(type_meta(document_type).get("extractor") or ""))
     if spec is None:
-        return []
+        return None
     schema, mapper = spec
     rules = policy()
     limit = int(rules.get("extract_char_limit") or 20000)
@@ -84,9 +121,9 @@ async def _try_typed(
         )
     except Exception:
         logger.exception("Typed document extract failed type=%s", document_type)
-        return []
+        return None
     if not isinstance(out, BaseModel):
-        return []
+        return None
     base = float(rules.get("typed_confidence") or 0.9)
     candidates: list[VaultCandidate] = []
     for field_key, value, evidence in mapper(out):
@@ -105,4 +142,35 @@ async def _try_typed(
                 source_reference=document_id,
             )
         )
-    return candidates
+    return out, candidates
+
+
+def _structured_envelope(
+    *,
+    document_id: str,
+    document_type: str,
+    extraction: dict,
+    candidates: list[VaultCandidate],
+) -> dict:
+    extractor = str(type_meta(document_type).get("extractor") or document_type or "generic")
+    subject = next(
+        (row.value for row in candidates if row.field_key == "identity.full_name"),
+        None,
+    )
+    evidence = [
+        {
+            "field": row.field_key,
+            "sourceSpan": row.evidence_text,
+            "confidence": row.confidence,
+        }
+        for row in candidates
+        if (row.evidence_text or "").strip()
+    ]
+    return {
+        "documentId": document_id,
+        "documentType": document_type,
+        "schemaVersion": f"{extractor}.v1",
+        "subject": {"name": subject} if subject else {},
+        "extraction": extraction,
+        "evidence": evidence,
+    }

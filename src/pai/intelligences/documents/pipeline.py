@@ -14,7 +14,7 @@ from pai.platform.llm.gateway import LLMGateway
 from pai.kernel.contracts.schemas import VaultCandidate
 from pai.intelligences.documents.classification.classifier import classify_content
 from pai.intelligences.documents.classification.taxonomy import default_type, evidence_eligible
-from pai.intelligences.documents.config import policy, taxonomy as di_taxonomy
+from pai.intelligences.documents.config import policy
 from pai.intelligences.documents.digitization.service import digitize_bytes
 from pai.intelligences.documents.digitization.schemas import DigitizationResult
 from pai.intelligences.documents.evidence.authority import source_authority
@@ -186,7 +186,7 @@ async def run_document_analysis(
 
         known = await _known_facts(session, person)
         _mark_stage(run, job, "extract", doc)
-        candidates = await extract_candidates(
+        extraction = await extract_candidates(
             gateway=gateway,
             document_id=str(doc.id),
             document_text=text,
@@ -194,6 +194,12 @@ async def run_document_analysis(
             known_facts=known,
             person_id=str(person.id),
         )
+        candidates = extraction.candidates
+        run.structured_payload = extraction.structured_payload
+        run.schema_version = str(extraction.structured_payload["schemaVersion"])
+        run.structured_document_type = doc.document_type
+        if version is not None:
+            version.structured_extraction = extraction.structured_payload
         if not candidates:
             job.last_error = (job.last_error or "") + f" extract:0 fields type={doc.document_type}"
         subject_field = str(rules.get("subject_field") or "identity.full_name")
@@ -326,6 +332,19 @@ async def run_document_analysis(
                     review = "accepted"
             elif result.decision == "PROPOSE_UPDATE":
                 pending_left = True
+                if existing is not None:
+                    await open_case(
+                        session,
+                        person_id=person.id,
+                        document_id=doc.id,
+                        fact=fact,
+                        field_key=cand.field_key,
+                        existing_value=existing,
+                        incoming_value=normalized,
+                        case_type="value_mismatch",
+                        reason_code=result.reason,
+                        severity="normal",
+                    )
             elif result.decision == "CRITICAL_CONFLICT":
                 pending_left = True
                 had_critical = True
@@ -343,6 +362,23 @@ async def run_document_analysis(
                 )
             elif result.decision in ("WRONG_SUBJECT", "REQUIRES_CONFIRMATION"):
                 pending_left = True
+                if (
+                    result.decision == "REQUIRES_CONFIRMATION"
+                    and existing is not None
+                    and result.reason != "identity_unconfirmed"
+                ):
+                    await open_case(
+                        session,
+                        person_id=person.id,
+                        document_id=doc.id,
+                        fact=fact,
+                        field_key=cand.field_key,
+                        existing_value=existing,
+                        incoming_value=normalized,
+                        case_type="value_mismatch",
+                        reason_code=result.reason,
+                        severity="high",
+                    )
             session.add(
                 DocumentCandidate(
                     document_id=doc.id,

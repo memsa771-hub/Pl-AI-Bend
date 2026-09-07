@@ -40,6 +40,7 @@ async def create_document_upload(
     mime = validate_upload_bytes(filename, content_type, data, settings)
     await scan_bytes(data, filename=filename, settings=settings)
     source = normalize_source_type(source_type)
+    origin = "pai_generated" if source == "ai_generated" else "user_uploaded"
     actor = normalize_created_by(created_by)
     classified = classify_document(filename=filename, hint=document_type, source_type=source)
     eligible = evidence_eligible(source_type=source, document_type=classified["document_type"])
@@ -59,6 +60,7 @@ async def create_document_upload(
             document_type=classified["document_type"],
             category=classified["category"],
             source_type=source,
+            origin=origin,
             created_by=actor,
             base_criticality=classified["base_criticality"],
             evidence_eligible=eligible,

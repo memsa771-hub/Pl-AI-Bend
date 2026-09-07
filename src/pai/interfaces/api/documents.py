@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pai.config import Settings, get_settings
-from pai.domains.documents.models import Document, DocumentJob
+from pai.domains.documents.models import Document, DocumentJob, DocumentVersion
 from pai.domains.documents.service import (
     enqueue_reprocess,
     get_document_owned,
@@ -60,6 +60,8 @@ def _public_document(doc: Document, *, open_cases: int = 0) -> dict:
         "documentType": doc.document_type or "other",
         "category": doc.category,
         "sourceType": doc.source_type,
+        "sourceChannel": doc.source_type,
+        "origin": doc.origin,
         "createdBy": doc.created_by,
         "processingStatus": doc.status,
         "status": doc.status,
@@ -88,11 +90,7 @@ async def upload_document(
     person=Depends(require_onboarding_complete),
     file: UploadFile = File(...),
     document_type: str | None = Form(default=None, alias="documentType"),
-    source_type: str | None = Form(default="document_vault", alias="sourceType"),
 ) -> JSONResponse:
-    allowed_sources = set(load_taxonomy()["source_types"]) - {"ai_generated"}
-    if source_type not in allowed_sources:
-        source_type = "document_vault"
     data = await file.read(settings.document_max_bytes + 1)
     content_type = file.content_type or "application/octet-stream"
     storage = _storage(settings)
@@ -105,7 +103,7 @@ async def upload_document(
             content_type=content_type,
             data=data,
             storage=storage,
-            source_type=source_type or "document_vault",
+            source_type="document_vault",
             document_type=document_type,
             created_by="student",
         )
@@ -168,6 +166,8 @@ async def get_document(
     finally:
         await storage.aclose()
     payload = _public_document(doc)
+    version = await session.get(DocumentVersion, doc.current_version_id) if doc.current_version_id else None
+    payload["structuredExtraction"] = version.structured_extraction if version else None
     payload["downloadUrl"] = signed
     return JSONResponse(content=success(payload))
 

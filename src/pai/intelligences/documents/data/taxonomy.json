@@ -25,9 +25,9 @@
     "experience_letter": { "category": "career", "base_criticality": "normal", "trust_level": "student_provided", "party_roles": ["subject", "issuer"] },
     "bank_statement": { "category": "financial", "base_criticality": "high", "trust_level": "student_provided", "party_roles": ["owner", "issuer"] },
     "sponsorship_letter": { "category": "financial", "base_criticality": "high", "trust_level": "student_provided", "party_roles": ["sponsor", "subject"] },
-    "sop": { "category": "application", "base_criticality": "high", "trust_level": "pai_generated", "party_roles": ["subject"] },
-    "personal_statement": { "category": "application", "base_criticality": "high", "trust_level": "pai_generated", "party_roles": ["subject"] },
-    "lor": { "category": "application", "base_criticality": "high", "trust_level": "pai_generated", "party_roles": ["subject", "author"] },
+    "sop": { "category": "application", "base_criticality": "high", "trust_level": "user_uploaded_unverified", "party_roles": ["subject"] },
+    "personal_statement": { "category": "application", "base_criticality": "high", "trust_level": "user_uploaded_unverified", "party_roles": ["subject"] },
+    "lor": { "category": "application", "base_criticality": "high", "trust_level": "user_uploaded_unverified", "party_roles": ["subject", "author"] },
     "visa": { "category": "immigration", "base_criticality": "high", "trust_level": "student_provided", "party_roles": ["subject", "issuer"] },
     "residence_permit": { "category": "immigration", "base_criticality": "high", "trust_level": "student_provided", "party_roles": ["subject", "issuer"] },
     "other": { "category": "other", "base_criticality": "low", "trust_level": "unverified", "party_roles": ["subject"] }
@@ -52,7 +52,6 @@
     { "needles": ["residence", "permit"], "type": "residence_permit" },
     { "needles": ["experience letter", "employment letter"], "type": "experience_letter" }
   ],
-  "generated_types": ["sop", "personal_statement", "lor"],
   "upload_mimes": {
     "application/pdf": [".pdf"],
     "text/plain": [".txt"],
