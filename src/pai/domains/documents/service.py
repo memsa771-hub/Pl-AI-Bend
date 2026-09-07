@@ -34,7 +34,13 @@ class DocumentIdentityUnresolvedError(AuthError):
 
 
 async def enqueue_reprocess(session: AsyncSession, person_id: uuid.UUID, document_id: uuid.UUID) -> None:
+    from pai.domains.student.person.write_lock import lock_person
+    await lock_person(session, person_id)
     doc = await get_document_owned(session, person_id, document_id)
+    if doc.source_type == "ai_generated":
+        raise AuthError(code="EXTRACTION_DISABLED",
+                        message="AI-generated documents cannot be used as student evidence.",
+                        status_code=409)
     job = DocumentJob(
         document_id=doc.id,
         document_version_id=doc.current_version_id,
