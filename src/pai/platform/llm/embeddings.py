@@ -97,6 +97,16 @@ class OpenAIEmbeddingProvider:
                 self.calls,
                 self.tokens,
             )
+        except TimeoutError:
+            # Distinct from a request failure: the budget is too small for this
+            # deployment's distance to the provider, and every call will fail
+            # the same way. Name the knob so the log says what to change.
+            logger.warning(
+                "Embedding timed out after EMBEDDING_TIMEOUT_SECONDS=%ss; "
+                "recall falls back to keyword matching",
+                self._settings.embedding_timeout_seconds,
+            )
+            return None
         except Exception:
             logger.exception("Embedding request failed")
             return None

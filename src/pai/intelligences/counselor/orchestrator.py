@@ -15,7 +15,6 @@ from pai.domains.goals.types import GoalWriteAction
 from pai.domains.memory.formation import (
     apply_memory_drafts,
     drafts_from_turn,
-    embed_pending_memories,
 )
 from pai.domains.memory.service import PersonMemoryService
 from pai.domains.student.person.models import Person
@@ -172,8 +171,18 @@ class PAIOrchestrator:
             try:
                 async with asyncio.timeout(self._settings.memory_recall_budget_seconds):
                     return await timed("semantic_recall")(lambda: self._memory.recall(state["user_message"]))()
+            except TimeoutError:
+                # The counselor answers with no memory of this student. That is
+                # a degraded turn, not routine — log it loudly enough to notice
+                # before it becomes the normal case.
+                logger.warning(
+                    "Memory recall exceeded MEMORY_RECALL_BUDGET_SECONDS=%ss; "
+                    "replying without recalled memory",
+                    self._settings.memory_recall_budget_seconds,
+                )
+                return ""
             except Exception:
-                logger.info("Memory recall unavailable within chat budget")
+                logger.exception("Memory recall failed; replying without recalled memory")
                 return ""
 
         memory_task = asyncio.create_task(bounded_recall())

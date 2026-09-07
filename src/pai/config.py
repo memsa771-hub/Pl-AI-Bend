@@ -116,9 +116,17 @@ class Settings(BaseSettings):
     embedding_dimensions: int = Field(default=1536, alias="EMBEDDING_DIMENSIONS")
     # Rows pulled by vector search before structural re-ranking in Python.
     embedding_candidate_limit: int = Field(default=40, alias="EMBEDDING_CANDIDATE_LIMIT")
-    embedding_timeout_seconds: float = Field(default=0.6, gt=0, alias="EMBEDDING_TIMEOUT_SECONDS")
-    memory_recall_budget_seconds: float = Field(default=0.9, gt=0, le=2, alias="MEMORY_RECALL_BUDGET_SECONDS")
-    turn_understanding_budget_seconds: float = Field(default=1.2, gt=0, le=2, alias="TURN_UNDERSTANDING_BUDGET_SECONDS")
+    # Measured: text-embedding-3-small answers in ~1.8s from ap-southeast-2,
+    # occasionally 8s. At 0.6s every call timed out and recall silently fell
+    # back to lexical ranking, which looks like working software. Latency is
+    # regional, so this is a knob — but the default must let a normal call
+    # finish, not merely bound the wait.
+    embedding_timeout_seconds: float = Field(default=3.0, gt=0, alias="EMBEDDING_TIMEOUT_SECONDS")
+    # Must exceed embedding_timeout_seconds: recall embeds the query first, so a
+    # budget below it can never succeed. No le= ceiling — a deployment far from
+    # the provider has to be able to raise this.
+    memory_recall_budget_seconds: float = Field(default=4.0, gt=0, alias="MEMORY_RECALL_BUDGET_SECONDS")
+    turn_understanding_budget_seconds: float = Field(default=2.0, gt=0, le=3, alias="TURN_UNDERSTANDING_BUDGET_SECONDS")
     memory_rerank_url: str = Field(default="", alias="MEMORY_RERANK_URL")
     memory_rerank_api_key: str = Field(default="", alias="MEMORY_RERANK_API_KEY")
     memory_rerank_model: str = Field(default="", alias="MEMORY_RERANK_MODEL")
@@ -128,8 +136,12 @@ class Settings(BaseSettings):
 
     enable_rate_limits: bool = Field(default=True, alias="ENABLE_RATE_LIMITS")
     rate_limit_fail_closed: bool = Field(default=False, alias="RATE_LIMIT_FAIL_CLOSED")
+    # consume() runs a clock read plus an upsert per counter and commits, which
+    # measures ~1.7s steady against a pooled remote database. At 1.0s it never
+    # completed, so limits were not enforced. Keep a five-second ceiling because
+    # this work runs before every request and the configured policy fails open.
     rate_limit_backend_timeout_seconds: float = Field(
-        default=1.0, gt=0, le=5, alias="RATE_LIMIT_BACKEND_TIMEOUT_SECONDS"
+        default=2.5, gt=0, le=5, alias="RATE_LIMIT_BACKEND_TIMEOUT_SECONDS"
     )
     request_limit_per_minute: int = Field(default=120, gt=0, alias="REQUEST_LIMIT_PER_MINUTE")
     user_request_limit_per_minute: int = Field(default=60, gt=0, alias="USER_REQUEST_LIMIT_PER_MINUTE")
@@ -198,6 +210,65 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"Redirect origin {origin} must also be listed in CORS_ORIGINS."
                 )
+        return self
+
+    # A round trip to an embeddings API does not finish in under a second from
+    # most regions — measured at ~2s, occasionally 8s, from ap-southeast-2. Any
+    # budget below this is not "tight", it is off, and the failure is swallowed.
+    _MIN_VIABLE_EMBEDDING_TIMEOUT = 1.5
+    # consume() is several statements plus a commit against a pooled remote
+    # Postgres; measured ~1.7s steady from the same region.
+    _MIN_VIABLE_RATE_LIMIT_TIMEOUT = 2.0
+
+    @model_validator(mode="after")
+    def embedding_budgets_are_reachable(self) -> Self:
+        """Refuse timeouts that can never succeed.
+
+        Both failures here are caught and turned into "no memory found", so a
+        too-small budget looks exactly like a student the counselor knows
+        nothing about. Fail at startup instead: silently downgrading the memory
+        the counselor runs on is worse than not starting.
+        """
+        if not self.enable_semantic_embeddings:
+            return self
+        if self.embedding_timeout_seconds < self._MIN_VIABLE_EMBEDDING_TIMEOUT:
+            raise ValueError(
+                f"EMBEDDING_TIMEOUT_SECONDS ({self.embedding_timeout_seconds}s) is below "
+                f"{self._MIN_VIABLE_EMBEDDING_TIMEOUT}s, which no embeddings round trip "
+                "meets — every call would time out and recall would silently fall back to "
+                "keyword matching. Raise it, or set ENABLE_SEMANTIC_EMBEDDINGS=false to "
+                "choose lexical recall deliberately."
+            )
+        # Recall embeds the query before it can search, so the budget has to
+        # outlast the call it contains.
+        if self.memory_recall_budget_seconds <= self.embedding_timeout_seconds:
+            raise ValueError(
+                f"MEMORY_RECALL_BUDGET_SECONDS ({self.memory_recall_budget_seconds}s) must "
+                f"exceed EMBEDDING_TIMEOUT_SECONDS ({self.embedding_timeout_seconds}s), or "
+                "the budget kills the embedding it is waiting for."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def rate_limit_timeout_is_reachable(self) -> Self:
+        """A limiter that always times out is a limiter that is switched off.
+
+        consume() fails open by default, so an unreachable budget does not break
+        requests — it silently stops enforcing every limit, including the daily
+        LLM spend caps, while the logs show a handled warning.
+        """
+        if (
+            self.enable_rate_limits
+            and self.rate_limit_backend_timeout_seconds < self._MIN_VIABLE_RATE_LIMIT_TIMEOUT
+        ):
+            raise ValueError(
+                f"RATE_LIMIT_BACKEND_TIMEOUT_SECONDS "
+                f"({self.rate_limit_backend_timeout_seconds}s) is below "
+                f"{self._MIN_VIABLE_RATE_LIMIT_TIMEOUT}s, which the counter upsert cannot "
+                "meet against a remote database — the limiter would fail open on every "
+                "request and enforce nothing. Raise it, or set ENABLE_RATE_LIMITS=false "
+                "to disable limits deliberately."
+            )
         return self
 
     def next_path(self, *, onboarding_completed: bool) -> str:
