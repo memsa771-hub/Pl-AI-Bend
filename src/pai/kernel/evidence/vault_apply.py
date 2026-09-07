@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import uuid
-from typing import Any
-
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -184,6 +181,7 @@ async def process_candidates(
             field,
             vault_status=vault_status,
             recompute_completion=False,
+            verification_level=vlevel,
         )
         if typed.status == "pending":
             pending.append(candidate)

@@ -13,6 +13,7 @@ from pai.domains.student.person.models import (
     PersonVault,
     Project,
     Skill,
+    TestAttempt,
     VaultValue,
     WorkExperience,
 )
@@ -27,6 +28,7 @@ _TYPED_MODELS: list[tuple[str, type, str]] = [
     ("skills", Skill, "skills"),
     ("certifications", Certification, "certifications"),
     ("goals", Goal, "goals"),
+    ("test_attempts", TestAttempt, "testAttempts"),
 ]
 
 
@@ -197,6 +199,7 @@ def _field_value(
         "skills": "skills",
         "certifications": "certifications",
         "goals": "goals",
+        "test_attempts": "testAttempts",
     }
     api_name = storage_to_typed.get(field.storage)
     if api_name:
@@ -258,6 +261,7 @@ async def build_vault_status(
         "skills": bool(typed.get("skills")),
         "certifications": bool(typed.get("certifications")),
         "goals": bool(typed.get("goals")),
+        "test_attempts": bool(typed.get("testAttempts")),
     }
     snapshot = {"active_keys": set(sparse.keys()), "typed_present": typed_present}
     scopes: list[str] = list(vault.applicable_scopes or ["universal"])

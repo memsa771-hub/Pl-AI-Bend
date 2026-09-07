@@ -30,24 +30,18 @@ def validate_candidate(candidate: VaultCandidate) -> VaultCandidate | None:
         if not _value_matches_type(field.value_type, candidate.value):
             return None
         return candidate
-    if field.storage in (
-        "educations",
-        "goals",
-        "person",
-        "work_experiences",
-        "skills",
-        "projects",
-        "certifications",
-    ):
-        if field.key == "education.gpa" and isinstance(candidate.value, (int, float)):
-            return candidate
-        if field.value_type == "json" and isinstance(candidate.value, (dict, list, str)):
-            return candidate
-        if field.value_type == "string" and isinstance(candidate.value, str):
-            return candidate
-        if field.value_type == "number" and isinstance(candidate.value, (int, float)):
-            return candidate
-        return None
+
+    # Any other storage is a typed table. The catalog already says which one, so
+    # this checks the value is shaped like something the typed applier can read
+    # rather than re-listing the tables that exist.
+    if field.key == "education.gpa" and isinstance(candidate.value, (int, float)):
+        return candidate
+    if field.value_type in ("json", "array") and isinstance(candidate.value, (dict, list, str)):
+        return candidate
+    if field.value_type == "string" and isinstance(candidate.value, str):
+        return candidate
+    if field.value_type == "number" and isinstance(candidate.value, (int, float)):
+        return candidate
     return None
 
 

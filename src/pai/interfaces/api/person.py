@@ -24,8 +24,15 @@ from pai.domains.student.person.typed_resources import (
     list_resources,
     update_resource,
 )
+from pai.domains.student.education.timeline import order_timeline
+from pai.domains.student.evidence import list_entity_evidence
+from pai.domains.student.issues.service import issue_dict, list_issues, resolve_issue
 from pai.domains.student.normalization.phone import normalize_phone
+from pai.domains.student.person.models import Education
+from pai.domains.student.test_attempts import attempt_dict, list_test_attempts
+from pai.domains.student.typed_apply import EDUCATION_ENTITY
 from pai.interfaces.api.schemas import success
+from pai.kernel.errors import PersonNotFoundError
 
 from pai.domains.student.person.qualifications import Qualification
 
@@ -311,3 +318,75 @@ _resource_router("projects", "projects", ProjectCreate, ProjectPatch)
 _resource_router("skills", "skills", SkillCreate, SkillPatch)
 _resource_router("certifications", "certifications", CertCreate, CertPatch)
 _resource_router("goals", "goals", GoalCreate, GoalPatch)
+
+
+class IssueResolution(BaseModel):
+    status: str = Field(pattern="^(open|resolved|ignored|accepted_as_valid)$")
+    note: str | None = None
+
+
+@router.get("/education-timeline")
+async def get_education_timeline(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    person=Depends(resolve_person_from_token),
+) -> JSONResponse:
+    """Education in academic order, with the evidence and open issues per record."""
+    rows = order_timeline(await list_resources(session, Education, person.id, limit=100))
+    issues = await list_issues(session, person.id, domain="education")
+    by_entity: dict[str, list[dict[str, Any]]] = {}
+    for issue in issues:
+        for entity_id in issue.related_entity_ids or []:
+            by_entity.setdefault(str(entity_id), []).append(issue_dict(issue))
+
+    items = []
+    for index, row in enumerate(rows):
+        item = _row_dict(row)
+        item["sequenceOrder"] = index
+        item["evidence"] = await list_entity_evidence(session, EDUCATION_ENTITY, row.id)
+        item["issues"] = by_entity.get(str(row.id), [])
+        items.append(item)
+    return JSONResponse(
+        content=success({"items": items, "issues": [issue_dict(i) for i in issues]})
+    )
+
+
+@router.get("/test-attempts")
+async def get_test_attempts(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    person=Depends(resolve_person_from_token),
+) -> JSONResponse:
+    rows = await list_test_attempts(session, person.id)
+    return JSONResponse(content=success({"items": [attempt_dict(r) for r in rows]}))
+
+
+@router.get("/issues")
+async def get_profile_issues(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    person=Depends(resolve_person_from_token),
+    domain: str | None = Query(None),
+    status: str = Query("open"),
+) -> JSONResponse:
+    rows = await list_issues(
+        session, person.id, domain=domain, status=None if status == "all" else status
+    )
+    return JSONResponse(content=success({"items": [issue_dict(r) for r in rows]}))
+
+
+@router.patch("/issues/{issue_id}")
+async def patch_profile_issue(
+    issue_id: str,
+    body: IssueResolution,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    person=Depends(resolve_person_from_token),
+) -> JSONResponse:
+    row = await resolve_issue(
+        session,
+        person.id,
+        uuid_mod.UUID(issue_id),
+        status=body.status,
+        resolution={"by": "person", "note": body.note} if body.note else {"by": "person"},
+    )
+    if row is None:
+        raise PersonNotFoundError("Issue not found.")
+    await session.commit()
+    return JSONResponse(content=success({"item": issue_dict(row)}))

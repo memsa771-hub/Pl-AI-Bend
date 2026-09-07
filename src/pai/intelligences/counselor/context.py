@@ -262,6 +262,16 @@ async def build_counselor_context(
             _logging.getLogger(__name__).exception(
                 "Failed to load active goal brief (non-fatal)"
             )
+    open_issues: list[Any] = []
+    try:
+        from pai.domains.student.issues.service import list_issues
+
+        open_issues = await list_issues(session, person.id, limit=20)
+    except Exception:
+        import logging as _logging
+
+        _logging.getLogger(__name__).exception("Failed to load profile issues (non-fatal)")
+
     from pai.intelligences.counselor.discovery import explain, select_discovery_candidates
 
     discovery = select_discovery_candidates(
@@ -269,6 +279,7 @@ async def build_counselor_context(
         missing_important=raw_missing_important,
         missing_enrichment=raw_missing_enrichment,
         depth_gaps=depth_gaps,
+        issues=open_issues,
         message=message,
         goal_type=active_goal_type,
         known_facts=known,
