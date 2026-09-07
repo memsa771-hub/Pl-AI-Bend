@@ -3,7 +3,7 @@ import asyncio
 from sqlalchemy import text
 from pai.platform.database.db import get_session_factory
 
-EXPECTED_MIGRATION = "016_operational_guards"
+EXPECTED_MIGRATION = "020_longitudinal_student_model"
 WORKER_TABLES = {"documents": "document_jobs", "goals": "goal_jobs", "intelligence": "person_jobs"}
 
 async def heartbeat(settings, kind):
