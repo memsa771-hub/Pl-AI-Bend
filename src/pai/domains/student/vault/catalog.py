@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-CATALOG_VERSION = "1.4.0"
+CATALOG_VERSION = "1.5.0"
 AUTH_PROVIDER_NAME = "supabase"
 # Always-on scopes so PAI can see what a student still needs for guidance.
 GUIDANCE_SCOPES = ("universal", "education", "application", "career")
@@ -29,6 +29,7 @@ StorageKind = Literal[
     "skills",
     "certifications",
     "goals",
+    "test_attempts",
 ]
 ValueType = Literal["string", "number", "boolean", "date", "json", "array"]
 
@@ -464,11 +465,12 @@ def _fields() -> tuple[CatalogField, ...]:
             priority="I",
             sensitive=False,
             derived=False,
-            storage="vault_value",
+            # Attempts are rows, not a field: retakes must not overwrite (doc §20).
+            storage="test_attempts",
             applicable_scope="application",
             value_type="array",
             editable=True,
-            repeatable=False,
+            repeatable=True,
         ),
         # Mobility / finance / lifestyle sparse
         CatalogField(

@@ -26,6 +26,7 @@ SCOPE_BY_RESOURCE = {
     "skills": "career",
     "certifications": "career",
     "goals": "application",
+    "test_attempts": "application",
 }
 
 
@@ -43,6 +44,28 @@ async def list_resources(
     return list(result.scalars().all())
 
 
+async def _sync_education_derivations(
+    session: AsyncSession, person: Person, row: Any
+) -> None:
+    """Keep manually edited education consistent with extracted education.
+
+    A degree typed into the UI has to land on the same canonical level and be
+    validated the same way as one PAI learned from chat, otherwise the timeline
+    only understands half the student's history.
+    """
+    from pai.domains.student.typed_apply import (
+        _apply_qualification_identity,
+        revalidate_education_timeline,
+    )
+
+    _apply_qualification_identity(
+        row,
+        {"degree": row.degree, "major": row.major, "original_name": row.original_name},
+    )
+    await session.flush()
+    await revalidate_education_timeline(session, person, detected_from="manual:education_edit")
+
+
 async def create_resource(
     session: AsyncSession,
     model: type,
@@ -52,6 +75,8 @@ async def create_resource(
     row = model(person_id=person.id, **data)
     session.add(row)
     await session.flush()
+    if model is Education:
+        await _sync_education_derivations(session, person, row)
     scope = SCOPE_BY_RESOURCE.get(model.__tablename__)
     if scope:
         await expand_scope_for_person(session, person, scope)
@@ -84,6 +109,8 @@ async def update_resource(
         if hasattr(row, key) and val is not None:
             setattr(row, key, val)
     await session.flush()
+    if model is Education:
+        await _sync_education_derivations(session, person, row)
     if person.vault:
         await apply_completion_to_vault(session, person, person.vault)
     await session.commit()
@@ -103,6 +130,13 @@ async def delete_resource(
     if row is None:
         raise PersonNotFoundError("Resource not found.")
     await session.delete(row)
+    await session.flush()
+    if model is Education:
+        from pai.domains.student.typed_apply import revalidate_education_timeline
+
+        await revalidate_education_timeline(
+            session, person, detected_from="manual:education_delete"
+        )
     if person.vault:
         await apply_completion_to_vault(session, person, person.vault)
     await session.commit()

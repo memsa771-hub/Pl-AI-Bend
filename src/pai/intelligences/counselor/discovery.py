@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from pai.domains.student.vault.catalog import VAULT_CATALOG, CatalogField, Priority
 from pai.intelligences.counselor.profile_depth import DepthGap
@@ -99,6 +100,36 @@ _GOAL_TYPE_SECTIONS: dict[str, tuple[str, ...]] = {
 _RECENTLY_ASKED_WINDOW_SECONDS = 3 * 24 * 3600.0
 
 
+# How much a detected profile issue is worth raising, by kind. A contradiction
+# outranks a gap: acting on a fact we know is disputed is worse than acting on
+# one we know is missing.
+_ISSUE_IMPACT: dict[str, float] = {
+    "contradicting_grade": 0.9,
+    "contradicting_date": 0.75,
+    "contradicting_institution": 0.7,
+    "contradicting_value": 0.65,
+    "ambiguous_entity": 0.7,
+    "duplicate_entity": 0.6,
+    "missing_stage": 0.6,
+    "impossible_transition": 0.45,
+    "missing_dates": 0.35,
+    "date_gap": 0.3,
+    "date_overlap": 0.2,
+}
+_DEFAULT_ISSUE_IMPACT = 0.4
+
+_SEVERITY_WEIGHT: dict[str, float] = {"high": 1.0, "medium": 0.6, "low": 0.3}
+
+# Issue domain -> Vault section, so issues share the message/goal relevance
+# machinery with catalog fields instead of inventing a second one.
+_ISSUE_DOMAIN_SECTION: dict[str, str] = {
+    "education": "education",
+    "work": "career",
+    "projects": "career",
+    "tests": "application",
+}
+
+
 @dataclass(frozen=True)
 class DiscoveryCandidate:
     field_key: str
@@ -107,10 +138,12 @@ class DiscoveryCandidate:
     score: float
     reasons: dict[str, float] = field(default_factory=dict)
     # "field" = a missing catalog field; "depth" = a have-it-but-shallow gap
-    # (e.g. an earlier degree) surfaced by profile_depth.py.
+    # (e.g. an earlier degree) surfaced by profile_depth.py; "issue" = a gap or
+    # contradiction detected by timeline validation.
     kind: str = "field"
     label: str | None = None
     reason_text: str | None = None
+    issue_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -214,12 +247,53 @@ def score_depth_gap(
     )
 
 
+def score_issue(
+    issue: Any,
+    *,
+    message: str,
+    goal_type: str | None,
+) -> DiscoveryCandidate:
+    """Score a detected profile issue against the current turn.
+
+    Issues carry a base weight even when the turn is unrelated — unlike depth
+    gaps — because a contradiction stays worth resolving whatever the student
+    happens to be asking about. Relevance still decides ordering (Rule 8).
+    """
+    section = _ISSUE_DOMAIN_SECTION.get(issue.domain, issue.domain)
+    msg_rel = _message_relevance(message, section)
+    goal_rel = _goal_relevance(goal_type, section)
+    impact = _ISSUE_IMPACT.get(issue.issue_type, _DEFAULT_ISSUE_IMPACT)
+    severity = _SEVERITY_WEIGHT.get(issue.severity, 0.6)
+    # Issues PAI cannot resolve by asking are recorded but never volunteered.
+    ask_weight = 1.0 if issue.clarification_needed else 0.35
+
+    score = ask_weight * (0.30 * msg_rel + 0.18 * goal_rel + 0.32 * impact + 0.20 * severity)
+    return DiscoveryCandidate(
+        field_key=f"issue.{issue.domain}.{issue.issue_type}",
+        priority="I",
+        section=section,
+        score=round(score, 4),
+        reasons={
+            "message_relevance": msg_rel,
+            "goal_relevance": goal_rel,
+            "impact_weight": impact,
+            "severity_weight": severity,
+            "issue": 1.0,
+        },
+        kind="issue",
+        label=issue.issue_type.replace("_", " "),
+        reason_text=issue.clarification_prompt,
+        issue_id=str(issue.id),
+    )
+
+
 def select_discovery_candidates(
     *,
     missing_critical: list[str] | None = None,
     missing_important: list[str] | None = None,
     missing_enrichment: list[str] | None = None,
     depth_gaps: Sequence[DepthGap] | None = None,
+    issues: Sequence[Any] | None = None,
     message: str = "",
     goal_type: str | None = None,
     known_facts: list[str] | None = None,
@@ -275,6 +349,9 @@ def select_discovery_candidates(
         if depth_candidate is not None:
             candidates.append(depth_candidate)
 
+    for issue in issues or ():
+        candidates.append(score_issue(issue, message=message, goal_type=goal_type))
+
     candidates.sort(key=lambda c: c.score, reverse=True)
     top = candidates[0] if candidates and candidates[0].score > 0 else None
     runners_up = list(candidates[1 : 1 + max_runners_up]) if candidates else []
@@ -288,7 +365,7 @@ def select_discovery_candidates(
 
 def explain(candidate: DiscoveryCandidate) -> str:
     """One-line, human-readable rationale for the top candidate (doc §12)."""
-    if candidate.kind == "depth" and candidate.reason_text:
+    if candidate.kind in ("depth", "issue") and candidate.reason_text:
         return candidate.reason_text
     label = candidate.field_key.split(".")[-1].replace("_", " ")
     reasons = candidate.reasons

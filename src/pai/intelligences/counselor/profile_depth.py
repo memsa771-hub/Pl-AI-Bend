@@ -17,23 +17,24 @@ touch completion, presence, or extraction logic.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Any
 
-# Education ladder, highest to lowest. FSc/A-Levels collapse to
-# ``higher_secondary``; Matric/O-Levels to ``secondary``.
-_LADDER: tuple[str, ...] = ("phd", "master", "bachelor", "higher_secondary", "secondary")
+from pai.domains.student.education.levels import (
+    CANONICAL_LEVELS,
+    HIGHEST_LEVEL_TO_CANONICAL,
+    LEVEL_LABEL,
+)
+from pai.domains.student.education.levels import canonical_level as _canonical_level
+
+# Education ladder, highest to lowest. The taxonomy itself lives in
+# ``education/levels.py`` so depth ranking and timeline validation cannot drift
+# apart on what counts as a stage.
+_LADDER: tuple[str, ...] = tuple(reversed(CANONICAL_LEVELS))
 
 _RUNG_INDEX = {rung: i for i, rung in enumerate(_LADDER)}
 
-_RUNG_LABEL: dict[str, str] = {
-    "phd": "doctorate (PhD)",
-    "master": "master's degree",
-    "bachelor": "bachelor's degree",
-    "higher_secondary": "higher secondary (FSc / A-Levels / grade 12)",
-    "secondary": "secondary (Matric / O-Levels / grade 10)",
-}
+_RUNG_LABEL = LEVEL_LABEL
 
 # Base "how much this typically matters for deliverables" weight (0..1).
 _RUNG_IMPACT: dict[str, float] = {
@@ -44,51 +45,8 @@ _RUNG_IMPACT: dict[str, float] = {
     "secondary": 0.4,
 }
 
-# Ordered longest/most-specific first so "higher secondary" wins before
-# "secondary", and graduate rungs win before undergraduate.
-_RUNG_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("phd", re.compile(r"\b(ph\.?d|doctor(?:al|ate)?|dphil)\b", re.I)),
-    (
-        "master",
-        re.compile(
-            r"\b(master'?s?|m\.?s\.?c?|m\.?phil|mba|m\.?a\b|m\.?tech|m\.?e\b|post[- ]?grad(?:uate)?)\b",
-            re.I,
-        ),
-    ),
-    (
-        "bachelor",
-        re.compile(
-            r"\b(bachelor'?s?|b\.?s\.?c?s?|b\.?e\b|b\.?tech|b\.?a\b|b\.?com|b\.?b\.?a|ll\.?b|mbbs|under[- ]?grad(?:uate)?)\b",
-            re.I,
-        ),
-    ),
-    (
-        "higher_secondary",
-        re.compile(
-            r"\b(a[- ]?levels?|f\.?sc|hssc|intermediate|higher secondary|senior secondary|"
-            r"pre[- ]?(?:medical|engineering)|international baccalaureate|ib\b|diploma|"
-            r"grade 12|12th|high school)\b",
-            re.I,
-        ),
-    ),
-    (
-        "secondary",
-        re.compile(
-            r"\b(o[- ]?levels?|matric(?:ulation)?|ssc|secondary school certificate|"
-            r"grade 10|10th|igcse)\b",
-            re.I,
-        ),
-    ),
-)
-
 # education.highest_level enum -> ladder rung.
-_HIGHEST_TO_RUNG: dict[str, str] = {
-    "phd": "phd",
-    "master": "master",
-    "bachelor": "bachelor",
-    "diploma": "higher_secondary",
-    "high_school": "higher_secondary",
-}
+_HIGHEST_TO_RUNG = HIGHEST_LEVEL_TO_CANONICAL
 
 
 @dataclass(frozen=True)
@@ -105,12 +63,7 @@ class DepthGap:
 
 def classify_rung(text: str | None) -> str | None:
     """Map a degree / stream / level string to a ladder rung, or None."""
-    if not text:
-        return None
-    for rung, pattern in _RUNG_PATTERNS:
-        if pattern.search(str(text)):
-            return rung
-    return None
+    return _canonical_level(text)
 
 
 def _row_text(row: dict[str, Any]) -> str:

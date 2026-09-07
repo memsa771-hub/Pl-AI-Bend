@@ -182,6 +182,7 @@ async def process_candidates(
             field,
             vault_status=vault_status,
             recompute_completion=False,
+            verification_level=vlevel,
         )
         if typed.status != "rejected":
             accepted.append(

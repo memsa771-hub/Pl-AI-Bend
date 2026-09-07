@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pai.domains.goals.models import Goal
+from pai.domains.student.education.timeline import order_timeline
 from pai.domains.student.person.models import (
     Certification,
     Education,
@@ -16,6 +17,7 @@ from pai.domains.student.person.models import (
     Skill,
     WorkExperience,
 )
+from pai.domains.student.test_attempts import attempt_dict, list_test_attempts
 
 
 def _edu_dict(row: Education) -> dict[str, Any]:
@@ -24,6 +26,10 @@ def _edu_dict(row: Education) -> dict[str, Any]:
         "institution": row.institution,
         "degree": row.degree,
         "major": row.major,
+        "originalName": row.original_name,
+        "canonicalLevel": row.canonical_level,
+        "framework": row.framework,
+        "country": row.country,
         "graduationYear": row.graduation_year,
         "gpa": row.gpa,
         "gpaScale": row.gpa_scale,
@@ -88,15 +94,17 @@ async def load_typed_profile_records(
     limit_per_type: int = 20,
 ) -> dict[str, Any]:
     """Full typed records for the counselor (contents, not counts)."""
-    educations = list(
-        (
-            await session.execute(
-                select(Education)
-                .where(Education.person_id == person_id)
-                .order_by(Education.updated_at.desc())
-                .limit(limit_per_type)
-            )
-        ).scalars()
+    educations = order_timeline(
+        list(
+            (
+                await session.execute(
+                    select(Education)
+                    .where(Education.person_id == person_id)
+                    .order_by(Education.updated_at.desc())
+                    .limit(limit_per_type)
+                )
+            ).scalars()
+        )
     )
     goals = list(
         (
@@ -148,13 +156,17 @@ async def load_typed_profile_records(
             )
         ).scalars()
     )
+    attempts = await list_test_attempts(session, person_id, limit=limit_per_type)
     return {
+        # Education is returned in academic order so the counselor reads it as a
+        # timeline rather than as whatever was edited most recently.
         "educations": [_edu_dict(r) for r in educations],
         "goals": [_goal_dict(r) for r in goals],
         "workExperiences": [_work_dict(r) for r in work],
         "projects": [_project_dict(r) for r in projects],
         "skills": [_skill_dict(r) for r in skills],
         "certifications": [_cert_dict(r) for r in certs],
+        "testAttempts": [attempt_dict(r) for r in attempts],
         "counts": {
             "educations": len(educations),
             "goals": len(goals),
@@ -162,5 +174,6 @@ async def load_typed_profile_records(
             "projects": len(projects),
             "skills": len(skills),
             "certifications": len(certs),
+            "testAttempts": len(attempts),
         },
     }
