@@ -96,3 +96,35 @@ def test_shipped_defaults_are_self_consistent():
     live = get_settings()
     if live.enable_semantic_embeddings:
         assert live.memory_recall_budget_seconds > live.embedding_timeout_seconds
+
+
+def test_unreachable_rate_limit_timeout_is_rejected():
+    """1.0s against a counter upsert that measures ~1.7s.
+
+    consume() fails open, so this did not break requests — it stopped
+    enforcing every limit, daily LLM spend caps included, while logging a
+    handled warning.
+    """
+    with pytest.raises(ValueError, match="RATE_LIMIT_BACKEND_TIMEOUT_SECONDS"):
+        Settings.model_validate(
+            _settings(
+                enable_rate_limits=True, rate_limit_backend_timeout_seconds=1.0
+            ).model_dump()
+        )
+
+
+def test_rate_limit_timeout_has_no_hardcoded_ceiling():
+    """le=5 blocked the cold-connection case, which measured ~7.9s."""
+    ok = Settings.model_validate(
+        _settings(rate_limit_backend_timeout_seconds=15.0).model_dump()
+    )
+    assert ok.rate_limit_backend_timeout_seconds == 15.0
+
+
+def test_disabled_limits_skip_the_check():
+    ok = Settings.model_validate(
+        _settings(
+            enable_rate_limits=False, rate_limit_backend_timeout_seconds=0.1
+        ).model_dump()
+    )
+    assert ok.enable_rate_limits is False

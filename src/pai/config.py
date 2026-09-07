@@ -136,8 +136,14 @@ class Settings(BaseSettings):
 
     enable_rate_limits: bool = Field(default=True, alias="ENABLE_RATE_LIMITS")
     rate_limit_fail_closed: bool = Field(default=False, alias="RATE_LIMIT_FAIL_CLOSED")
+    # consume() runs a clock read plus an upsert per counter and commits, which
+    # measures ~1.7s steady and ~7.9s cold against a pooled Supabase in another
+    # region. At 1.0s it never completed: the limiter failed open on every
+    # request, so limits were not enforced at all. No le= ceiling — a cold
+    # connection needs more than 5s and the ceiling made that unreachable
+    # from .env.
     rate_limit_backend_timeout_seconds: float = Field(
-        default=1.0, gt=0, le=5, alias="RATE_LIMIT_BACKEND_TIMEOUT_SECONDS"
+        default=10.0, gt=0, alias="RATE_LIMIT_BACKEND_TIMEOUT_SECONDS"
     )
     request_limit_per_minute: int = Field(default=120, gt=0, alias="REQUEST_LIMIT_PER_MINUTE")
     user_request_limit_per_minute: int = Field(default=60, gt=0, alias="USER_REQUEST_LIMIT_PER_MINUTE")
@@ -212,6 +218,9 @@ class Settings(BaseSettings):
     # most regions — measured at ~2s, occasionally 8s, from ap-southeast-2. Any
     # budget below this is not "tight", it is off, and the failure is swallowed.
     _MIN_VIABLE_EMBEDDING_TIMEOUT = 1.5
+    # consume() is several statements plus a commit against a pooled remote
+    # Postgres; measured ~1.7s steady from the same region.
+    _MIN_VIABLE_RATE_LIMIT_TIMEOUT = 2.0
 
     @model_validator(mode="after")
     def embedding_budgets_are_reachable(self) -> Self:
@@ -239,6 +248,28 @@ class Settings(BaseSettings):
                 f"MEMORY_RECALL_BUDGET_SECONDS ({self.memory_recall_budget_seconds}s) must "
                 f"exceed EMBEDDING_TIMEOUT_SECONDS ({self.embedding_timeout_seconds}s), or "
                 "the budget kills the embedding it is waiting for."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def rate_limit_timeout_is_reachable(self) -> Self:
+        """A limiter that always times out is a limiter that is switched off.
+
+        consume() fails open by default, so an unreachable budget does not break
+        requests — it silently stops enforcing every limit, including the daily
+        LLM spend caps, while the logs show a handled warning.
+        """
+        if (
+            self.enable_rate_limits
+            and self.rate_limit_backend_timeout_seconds < self._MIN_VIABLE_RATE_LIMIT_TIMEOUT
+        ):
+            raise ValueError(
+                f"RATE_LIMIT_BACKEND_TIMEOUT_SECONDS "
+                f"({self.rate_limit_backend_timeout_seconds}s) is below "
+                f"{self._MIN_VIABLE_RATE_LIMIT_TIMEOUT}s, which the counter upsert cannot "
+                "meet against a remote database — the limiter would fail open on every "
+                "request and enforce nothing. Raise it, or set ENABLE_RATE_LIMITS=false "
+                "to disable limits deliberately."
             )
         return self
 
