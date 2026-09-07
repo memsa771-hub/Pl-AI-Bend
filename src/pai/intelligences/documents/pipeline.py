@@ -22,6 +22,7 @@ from pai.intelligences.documents.evidence.grounding import (
     evidence_grounded,
     extraction_confidence,
     page_for_span,
+    value_supported_by_evidence,
 )
 from pai.intelligences.documents.evidence.criticality import field_criticality, field_sensitivity
 from pai.intelligences.documents.extraction.extractor import extract_candidates
@@ -43,6 +44,7 @@ from pai.domains.documents.models import (
 from pai.domains.student.person.models import Education, Person, PersonVault, VaultValue
 from pai.domains.student.vault.catalog import get_catalog_field
 from pai.platform.storage.supabase import SupabaseStorageProvider
+from pai.domains.student.vault.security import SensitiveValueCodec
 
 
 def _mark_stage(
@@ -193,13 +195,30 @@ async def run_document_analysis(
             document_type=doc.document_type or default_type(),
             known_facts=known,
             person_id=str(person.id),
+            digitization_truncated=truncated,
         )
         candidates = extraction.candidates
-        run.structured_payload = extraction.structured_payload
+        codec = SensitiveValueCodec(settings.vault_encryption_key)
+        sensitive_fields = sorted({
+            candidate.field_key for candidate in candidates
+            if field_sensitivity(candidate.field_key) != "personal"
+        })
+        stored_payload = extraction.structured_payload
+        if sensitive_fields:
+            encrypted_payload = codec.encrypt_json(stored_payload)
+            stored_payload = {
+                key: stored_payload[key]
+                for key in ("documentId", "documentType", "schemaVersion", "extractionComplete", "truncated")
+            }
+            stored_payload["protectedSensitiveFields"] = sensitive_fields
+            run.structured_payload_encrypted = encrypted_payload
+            if version is not None:
+                version.structured_extraction_encrypted = encrypted_payload
+        run.structured_payload = stored_payload
         run.schema_version = str(extraction.structured_payload["schemaVersion"])
         run.structured_document_type = doc.document_type
         if version is not None:
-            version.structured_extraction = extraction.structured_payload
+            version.structured_extraction = stored_payload
         if not candidates:
             job.last_error = (job.last_error or "") + f" extract:0 fields type={doc.document_type}"
         subject_field = str(rules.get("subject_field") or "identity.full_name")
@@ -279,9 +298,19 @@ async def run_document_analysis(
                 document_version_id=version.id if version else None,
                 analysis_run_id=run.id,
                 field_key=cand.field_key,
-                raw_value=cand.value if isinstance(cand.value, (dict, list)) else cand.value,
-                normalized_value=normalized,
-                evidence_text=cand.evidence_text,
+                raw_value=None if field_sensitivity(cand.field_key) != "personal" else cand.value,
+                normalized_value=None if field_sensitivity(cand.field_key) != "personal" else normalized,
+                raw_value_encrypted=(codec.encrypt_json(cand.value)
+                    if field_sensitivity(cand.field_key) != "personal" else None),
+                normalized_value_encrypted=(codec.encrypt_json(normalized)
+                    if field_sensitivity(cand.field_key) != "personal" else None),
+                evidence_text=(
+                    None if field_sensitivity(cand.field_key) != "personal" else cand.evidence_text
+                ),
+                evidence_text_encrypted=(
+                    codec.encrypt_json(cand.evidence_text)
+                    if field_sensitivity(cand.field_key) != "personal" else None
+                ),
                 page=page_for_span(cand.evidence_text, pages),
                 extraction_confidence=confidence,
                 normalization_confidence=norm_conf,
@@ -307,6 +336,8 @@ async def run_document_analysis(
                     extraction_confidence=confidence,
                     ocr_confidence=ocr_conf,
                     document_quality=quality,
+                    normalization_confidence=norm_conf,
+                    exact_value_grounding=value_supported_by_evidence(cand.value, cand.evidence_text),
                 )
             )
             fact.reconciliation_status = result.decision
@@ -384,11 +415,20 @@ async def run_document_analysis(
                     document_id=doc.id,
                     document_version_id=version.id if version else None,
                     document_job_id=job.id,
+                    analysis_run_id=run.id,
                     person_id=person.id,
                     field_key=cand.field_key,
-                    value=normalized if isinstance(normalized, (dict, list)) else normalized,
+                    value=None if field_sensitivity(cand.field_key) != "personal" else normalized,
+                    value_encrypted=(codec.encrypt_json(normalized)
+                        if field_sensitivity(cand.field_key) != "personal" else None),
                     confidence=confidence,
-                    evidence_text=cand.evidence_text,
+                    evidence_text=(
+                        None if field_sensitivity(cand.field_key) != "personal" else cand.evidence_text
+                    ),
+                    evidence_text_encrypted=(
+                        codec.encrypt_json(cand.evidence_text)
+                        if field_sensitivity(cand.field_key) != "personal" else None
+                    ),
                     review_status=review,
                     reasoning_summary=f"{result.decision}:{result.reason}",
                 )

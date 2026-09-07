@@ -17,6 +17,9 @@ def compact_span(value: str | None) -> str:
 
 
 def evidence_grounded(span: str | None, document_text: str | None) -> bool:
+    if span and " | " in span:
+        parts = [part for part in span.split(" | ") if part.strip()]
+        return bool(parts) and all(evidence_grounded(part, document_text) for part in parts)
     needle, hay = fold_span(span), fold_span(document_text)
     if not needle or not hay:
         return False
@@ -26,7 +29,25 @@ def evidence_grounded(span: str | None, document_text: str | None) -> bool:
     return len(compact_needle) >= 8 and compact_needle in compact_hay
 
 
+def value_supported_by_evidence(value, span: str | None) -> bool:
+    """Require the evidence for a candidate to contain its own meaningful scalar values."""
+    if isinstance(value, dict):
+        values = [item for item in value.values() if item not in (None, "", [], {})]
+        return bool(values) and all(value_supported_by_evidence(item, span) for item in values)
+    if isinstance(value, list):
+        return bool(value) and all(value_supported_by_evidence(item, span) for item in value)
+    if isinstance(value, bool):
+        return False
+    token = compact_span(str(value))
+    evidence = compact_span(span)
+    return bool(token) and token in evidence
+
+
 def page_for_span(span: str | None, pages: list[dict] | None) -> int | None:
+    if span and " | " in span:
+        found = {page_for_span(part, pages) for part in span.split(" | ") if part.strip()}
+        found.discard(None)
+        return next(iter(found)) if len(found) == 1 else None
     for row in pages or []:
         if evidence_grounded(span, str(row.get("text") or "")):
             page = row.get("page")

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pai.domains.documents.models import (
     Document,
     DocumentCandidate,
+    DocumentAnalysisRun,
     DocumentJob,
     DocumentVersion,
     MessageDocument,
@@ -17,6 +18,8 @@ from pai.domains.documents.relations import add_relation
 from pai.domains.student.person.models import Person, PersonVault, VaultValue
 from pai.kernel.contracts.schemas import VaultCandidate
 from pai.kernel.errors import AuthError
+from pai.config import get_settings
+from pai.domains.student.vault.security import SensitiveValueCodec
 
 
 class DocumentNotFoundError(AuthError):
@@ -156,22 +159,38 @@ async def list_document_candidates(
     session: AsyncSession, person: Person, document_id: uuid.UUID
 ) -> list[dict]:
     doc = await get_document_owned(session, person.id, document_id)
+    latest_run_id = await session.scalar(
+        select(DocumentAnalysisRun.id)
+        .where(
+            DocumentAnalysisRun.document_id == doc.id,
+            DocumentAnalysisRun.document_version_id == doc.current_version_id,
+            DocumentAnalysisRun.status == "completed",
+        )
+        .order_by(DocumentAnalysisRun.completed_at.desc())
+        .limit(1)
+    )
+    if latest_run_id is None:
+        return []
     result = await session.execute(
         select(DocumentCandidate)
         .where(
             DocumentCandidate.document_id == doc.id,
             DocumentCandidate.person_id == person.id,
+            DocumentCandidate.document_version_id == doc.current_version_id,
+            DocumentCandidate.analysis_run_id == latest_run_id,
         )
         .order_by(DocumentCandidate.created_at.desc())
     )
     rows = list(result.scalars().all())
     current = await _current_vault_values(session, person, [row.field_key for row in rows])
+    codec = SensitiveValueCodec(get_settings().vault_encryption_key)
     return [
         {
             "id": str(row.id),
             "fieldKey": row.field_key,
-            "value": row.value,
-            "evidenceText": row.evidence_text,
+            "value": codec.decrypt_json(row.value_encrypted) if row.value_encrypted else row.value,
+            "evidenceText": (codec.decrypt_json(row.evidence_text_encrypted)
+                if row.evidence_text_encrypted else row.evidence_text),
             "confidence": row.confidence,
             "reviewStatus": row.review_status,
             "reason": row.reasoning_summary,
@@ -192,6 +211,16 @@ async def review_document_candidates(
     reject_ids: list[uuid.UUID] | None = None,
 ) -> tuple[set[str], list[VaultCandidate]]:
     doc = await get_document_owned(session, person.id, document_id)
+    latest_run_id = await session.scalar(
+        select(DocumentAnalysisRun.id)
+        .where(
+            DocumentAnalysisRun.document_id == doc.id,
+            DocumentAnalysisRun.document_version_id == doc.current_version_id,
+            DocumentAnalysisRun.status == "completed",
+        )
+        .order_by(DocumentAnalysisRun.completed_at.desc())
+        .limit(1)
+    )
     reject_ids = reject_ids or []
     requested = list(dict.fromkeys([*accept_ids, *reject_ids]))
     if requested:
@@ -200,9 +229,12 @@ async def review_document_candidates(
                 DocumentCandidate.document_id == doc.id,
                 DocumentCandidate.person_id == person.id,
                 DocumentCandidate.id.in_(requested),
+                DocumentCandidate.document_version_id == doc.current_version_id,
+                DocumentCandidate.analysis_run_id == latest_run_id,
+                DocumentCandidate.review_status == "pending",
             )
         )
-        if not list(found.all()):
+        if set(found.all()) != set(requested):
             raise AuthError(
                 code="CANDIDATE_NOT_FOUND",
                 message="Those ids are not candidates for this document. Copy ids from GET /documents/{id}/candidates.",
@@ -216,17 +248,24 @@ async def review_document_candidates(
                 DocumentCandidate.document_id == doc.id,
                 DocumentCandidate.person_id == person.id,
                 DocumentCandidate.id.in_(reject_ids),
+                DocumentCandidate.document_version_id == doc.current_version_id,
+                DocumentCandidate.analysis_run_id == latest_run_id,
+                DocumentCandidate.review_status == "pending",
             )
         )
         for row in result.scalars():
             row.review_status = "rejected"
     to_apply: list[VaultCandidate] = []
+    codec = SensitiveValueCodec(get_settings().vault_encryption_key)
     if accept_ids:
         result = await session.execute(
             select(DocumentCandidate).where(
                 DocumentCandidate.document_id == doc.id,
                 DocumentCandidate.person_id == person.id,
                 DocumentCandidate.id.in_(accept_ids),
+                DocumentCandidate.document_version_id == doc.current_version_id,
+                DocumentCandidate.analysis_run_id == latest_run_id,
+                DocumentCandidate.review_status == "pending",
             )
         )
         for row in result.scalars():
@@ -234,9 +273,10 @@ async def review_document_candidates(
             to_apply.append(
                 VaultCandidate(
                     field_key=row.field_key,
-                    value=row.value,
+                    value=codec.decrypt_json(row.value_encrypted) if row.value_encrypted else row.value,
                     confidence=row.confidence,
-                    evidence_text=row.evidence_text or "",
+                    evidence_text=(codec.decrypt_json(row.evidence_text_encrypted)
+                        if row.evidence_text_encrypted else row.evidence_text or ""),
                     source_type="document",
                     source_reference=str(doc.id),
                     rationale_summary=row.reasoning_summary or "",
@@ -245,6 +285,8 @@ async def review_document_candidates(
     leftover = await session.execute(
         select(DocumentCandidate.id).where(
             DocumentCandidate.document_id == doc.id,
+            DocumentCandidate.document_version_id == doc.current_version_id,
+            DocumentCandidate.analysis_run_id == latest_run_id,
             DocumentCandidate.review_status == "pending",
         )
     )

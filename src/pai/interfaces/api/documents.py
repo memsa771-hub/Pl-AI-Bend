@@ -33,6 +33,7 @@ from pai.interfaces.api.dependencies import get_db, require_onboarding_complete
 from pai.interfaces.api.schemas import success
 from pai.kernel.gates import accept_vault_candidates
 from pai.platform.storage.supabase import SupabaseStorageProvider
+from pai.domains.student.vault.security import SensitiveValueCodec
 
 router = APIRouter(prefix="/api/v1/documents", tags=["documents"])
 
@@ -112,6 +113,35 @@ async def upload_document(
     return JSONResponse(status_code=202, content=success(_public_document(doc)))
 
 
+@router.post("/chat-upload")
+async def upload_chat_document(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    person=Depends(require_onboarding_complete),
+    file: UploadFile = File(...),
+    document_type: str | None = Form(default=None, alias="documentType"),
+) -> JSONResponse:
+    """Chat's upload boundary owns the chat source channel; clients cannot forge it."""
+    data = await file.read(settings.document_max_bytes + 1)
+    storage = _storage(settings)
+    try:
+        doc = await create_document_upload(
+            session,
+            settings,
+            person,
+            filename=file.filename or "upload.bin",
+            content_type=file.content_type or "application/octet-stream",
+            data=data,
+            storage=storage,
+            source_type="chat_attachment",
+            document_type=document_type,
+            created_by="student",
+        )
+    finally:
+        await storage.aclose()
+    return JSONResponse(status_code=202, content=success(_public_document(doc)))
+
+
 @router.get("/taxonomy")
 async def document_taxonomy(person=Depends(require_onboarding_complete)) -> JSONResponse:
     _ = person
@@ -167,7 +197,12 @@ async def get_document(
         await storage.aclose()
     payload = _public_document(doc)
     version = await session.get(DocumentVersion, doc.current_version_id) if doc.current_version_id else None
-    payload["structuredExtraction"] = version.structured_extraction if version else None
+    if version and version.structured_extraction_encrypted:
+        payload["structuredExtraction"] = SensitiveValueCodec(
+            settings.vault_encryption_key
+        ).decrypt_json(version.structured_extraction_encrypted)
+    else:
+        payload["structuredExtraction"] = version.structured_extraction if version else None
     payload["downloadUrl"] = signed
     return JSONResponse(content=success(payload))
 

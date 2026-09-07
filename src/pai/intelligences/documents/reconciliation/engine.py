@@ -35,6 +35,8 @@ class ReconcileInput(BaseModel):
     extraction_confidence: float = 0.0
     ocr_confidence: float | None = None
     document_quality: str = "unknown"
+    normalization_confidence: float | None = None
+    exact_value_grounding: bool = False
 
 
 class ReconcileResult(BaseModel):
@@ -69,12 +71,14 @@ def reconcile(item: ReconcileInput) -> ReconcileResult:
             return ReconcileResult(decision="CRITICAL_CONFLICT", reason="critical_delta")
         return ReconcileResult(decision="REQUIRES_CONFIRMATION", reason="critical_unscored_ocr")
     if item.existing_value is None:
-        if (
-            conf >= float(rules["new_safe_confidence"])
-            and not critical
-            and readable
-            and not low_quality
-        ):
+        normalization_ok = (
+            item.normalization_confidence is None
+            or item.normalization_confidence >= float(rules.get("normalize_ok") or 0.95)
+        )
+        trusted_authority = item.source_authority in {"medium", "high"}
+        if (conf >= float(rules["propose_confidence"]) and not critical and readable
+                and not low_quality and item.identity_status == "matched"
+                and item.exact_value_grounding and normalization_ok and trusted_authority):
             return ReconcileResult(decision="NEW_SAFE_FACT", reason="new_high_confidence")
         if conf >= float(rules["propose_confidence"]):
             return ReconcileResult(decision="PROPOSE_UPDATE", reason="new_needs_review")

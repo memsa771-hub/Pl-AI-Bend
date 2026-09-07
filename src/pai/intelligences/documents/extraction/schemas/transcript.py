@@ -1,43 +1,43 @@
 from __future__ import annotations
 
-from typing import Any
+from pydantic import BaseModel
 
-from pydantic import BaseModel, Field
+from .common import EvidenceValue, GradeEvidence, field_tuple
 
 
 class TranscriptExtraction(BaseModel):
-    student_name: str | None = None
-    institution: str | None = None
-    degree: str | None = None
-    program: str | None = None
-    cumulative_gpa: float | None = None
-    gpa_scale: float | None = None
-    evidence_text: str = ""
-    courses: list[dict[str, Any]] = Field(default_factory=list)
+    student_name: EvidenceValue | None = None
+    institution: EvidenceValue | None = None
+    degree: EvidenceValue | None = None
+    program: EvidenceValue | None = None
+    cumulative_gpa: GradeEvidence | None = None
+    courses: EvidenceValue | None = None
 
 
 def to_field_map(row: TranscriptExtraction) -> list[tuple[str, object, str]]:
     out: list[tuple[str, object, str]] = []
-    if row.student_name:
-        out.append(("identity.full_name", row.student_name, row.evidence_text))
+    identity = field_tuple("identity.full_name", row.student_name)
+    if identity:
+        out.append(identity)
     if row.institution or row.degree or row.program:
+        fields = [item for item in (row.institution, row.degree, row.program) if item is not None]
         out.append(
             (
                 "education.records",
                 {
-                    "institution": row.institution,
-                    "degree": row.degree,
-                    "program": row.program,
+                    "institution": row.institution.value if row.institution else None,
+                    "degree": row.degree.value if row.degree else None,
+                    "program": row.program.value if row.program else None,
                 },
-                row.evidence_text,
+                " | ".join(item.evidence for item in fields),
             )
         )
     if row.cumulative_gpa is not None:
         out.append(
             (
                 "education.gpa",
-                {"value": row.cumulative_gpa, "scale": row.gpa_scale, "type": "cumulative"},
-                row.evidence_text,
+                {"value": row.cumulative_gpa.value, "scale": row.cumulative_gpa.scale, "type": "cumulative"},
+                row.cumulative_gpa.evidence,
             )
         )
     return out

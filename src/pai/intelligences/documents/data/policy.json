@@ -124,6 +124,7 @@
   "unconfirmed_identity": ["ambiguous", "likely_match"],
   "auto_apply_identity": ["matched"],
   "typed_confidence": 0.9,
+  "typed_min_grounded_fields": 2,
   "extract_char_limit": 20000,
   "classify_text_chars": 4000,
   "max_content_text_chars": 50000,

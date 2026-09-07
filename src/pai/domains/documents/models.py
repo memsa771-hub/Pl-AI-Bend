@@ -78,6 +78,7 @@ class DocumentVersion(Base):
     sha256: Mapped[str | None] = mapped_column(String(64))
     content_text: Mapped[str | None] = mapped_column(Text)
     structured_extraction: Mapped[dict | None] = mapped_column(JSONB)
+    structured_extraction_encrypted: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[str] = mapped_column(String(16), default="student", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -135,13 +136,18 @@ class DocumentCandidate(Base):
     document_job_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("document_jobs.id", ondelete="SET NULL"), index=True
     )
+    analysis_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("document_analysis_runs.id", ondelete="SET NULL"), index=True
+    )
     person_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True
     )
     field_key: Mapped[str] = mapped_column(String(128), nullable=False)
     value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSONB)
+    value_encrypted: Mapped[str | None] = mapped_column(Text)
     confidence: Mapped[float] = mapped_column(nullable=False)
     evidence_text: Mapped[str | None] = mapped_column(Text)
+    evidence_text_encrypted: Mapped[str | None] = mapped_column(Text)
     review_status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
     reasoning_summary: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
@@ -220,6 +226,7 @@ class DocumentAnalysisRun(Base):
     completed_stages: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     digitization: Mapped[dict | None] = mapped_column(JSONB)
     structured_payload: Mapped[dict | None] = mapped_column(JSONB)
+    structured_payload_encrypted: Mapped[str | None] = mapped_column(Text)
     schema_version: Mapped[str | None] = mapped_column(String(64))
     structured_document_type: Mapped[str | None] = mapped_column(String(64))
     provider_artifact_path: Mapped[str | None] = mapped_column(String(512))
@@ -253,9 +260,12 @@ class DocumentFact(Base):
     field_key: Mapped[str] = mapped_column(String(128), nullable=False)
     raw_value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSONB)
     normalized_value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSONB)
+    raw_value_encrypted: Mapped[str | None] = mapped_column(Text)
+    normalized_value_encrypted: Mapped[str | None] = mapped_column(Text)
     page: Mapped[int | None] = mapped_column(Integer)
     bounding_box: Mapped[dict | None] = mapped_column(JSONB)
     evidence_text: Mapped[str | None] = mapped_column(Text)
+    evidence_text_encrypted: Mapped[str | None] = mapped_column(Text)
     ocr_confidence: Mapped[float | None] = mapped_column(Float)
     extraction_confidence: Mapped[float] = mapped_column(Float, nullable=False)
     normalization_confidence: Mapped[float | None] = mapped_column(Float)
@@ -313,6 +323,8 @@ class VerificationCase(Base):
     field_key: Mapped[str] = mapped_column(String(128), nullable=False)
     existing_value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSONB)
     incoming_value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSONB)
+    existing_value_encrypted: Mapped[str | None] = mapped_column(Text)
+    incoming_value_encrypted: Mapped[str | None] = mapped_column(Text)
     existing_evidence: Mapped[dict | None] = mapped_column(JSONB)
     reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(48), default="open", nullable=False)

@@ -12,6 +12,9 @@ from pai.kernel.contracts.schemas import VaultCandidate
 from pai.intelligences.documents.config import policy
 from pai.domains.documents.models import Document, DocumentFact, VerificationCase
 from pai.domains.student.person.models import Person
+from pai.config import get_settings
+from pai.domains.student.vault.security import SensitiveValueCodec
+from pai.intelligences.documents.evidence.criticality import field_sensitivity
 
 RESOLUTIONS = {
     "resolved_document_correct",
@@ -41,6 +44,8 @@ async def open_case(
     reason_code: str,
     severity: str = "high",
 ) -> VerificationCase:
+    sensitive = field_sensitivity(field_key) != "personal"
+    codec = SensitiveValueCodec(get_settings().vault_encryption_key) if sensitive else None
     existing = await session.scalar(
         select(VerificationCase).where(
             VerificationCase.person_id == person_id,
@@ -52,8 +57,10 @@ async def open_case(
     )
     if existing is not None:
         existing.incoming_document_fact_id = fact.id if fact is not None else None
-        existing.existing_value = existing_value
-        existing.incoming_value = incoming_value
+        existing.existing_value = None if sensitive else existing_value
+        existing.incoming_value = None if sensitive else incoming_value
+        existing.existing_value_encrypted = codec.encrypt_json(existing_value) if codec else None
+        existing.incoming_value_encrypted = codec.encrypt_json(incoming_value) if codec else None
         existing.reason_code = reason_code
         existing.severity = severity
         existing.status = "open"
@@ -65,8 +72,10 @@ async def open_case(
         case_type=case_type,
         severity=severity,
         field_key=field_key,
-        existing_value=existing_value,
-        incoming_value=incoming_value,
+        existing_value=None if sensitive else existing_value,
+        incoming_value=None if sensitive else incoming_value,
+        existing_value_encrypted=codec.encrypt_json(existing_value) if codec else None,
+        incoming_value_encrypted=codec.encrypt_json(incoming_value) if codec else None,
         reason_code=reason_code,
         status="open",
     )
@@ -149,7 +158,13 @@ async def resolve_case(
     case.resolved_at = datetime.now(UTC)
     if resolution_type == "resolved_document_correct" and case.incoming_document_fact_id:
         fact = await session.get(DocumentFact, case.incoming_document_fact_id)
-        if fact is None or fact.person_id != person.id or not (fact.evidence_text or "").strip():
+        codec = SensitiveValueCodec(get_settings().vault_encryption_key)
+        evidence_text = (
+            codec.decrypt_json(fact.evidence_text_encrypted)
+            if fact is not None and fact.evidence_text_encrypted
+            else fact.evidence_text if fact is not None else None
+        )
+        if fact is None or fact.person_id != person.id or not (evidence_text or "").strip():
             await session.rollback()
             raise AuthError("RESOLUTION_NOT_APPLIED", "The document evidence is unavailable.", 422)
         if fact is not None:
@@ -159,9 +174,10 @@ async def resolve_case(
                 [
                     VaultCandidate(
                         field_key=fact.field_key,
-                        value=fact.normalized_value,
+                        value=(codec.decrypt_json(fact.normalized_value_encrypted)
+                            if fact.normalized_value_encrypted else fact.normalized_value),
                         confidence=fact.extraction_confidence,
-                        evidence_text=fact.evidence_text or "",
+                        evidence_text=evidence_text or "",
                         source_type="document",
                         source_reference=str(fact.document_id),
                         rationale_summary=f"user_resolution:{resolution_type}",
@@ -185,13 +201,16 @@ async def resolve_case(
 
 
 def public_case(row: VerificationCase) -> dict:
+    codec = SensitiveValueCodec(get_settings().vault_encryption_key)
     return {
         "id": str(row.id),
         "caseType": row.case_type,
         "severity": row.severity,
         "fieldKey": row.field_key,
-        "existingValue": row.existing_value,
-        "incomingValue": row.incoming_value,
+        "existingValue": (codec.decrypt_json(row.existing_value_encrypted)
+            if row.existing_value_encrypted else row.existing_value),
+        "incomingValue": (codec.decrypt_json(row.incoming_value_encrypted)
+            if row.incoming_value_encrypted else row.incoming_value),
         "reasonCode": row.reason_code,
         "status": row.status,
         "documentId": str(row.document_id) if row.document_id else None,
