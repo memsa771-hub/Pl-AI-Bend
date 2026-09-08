@@ -25,6 +25,8 @@ def recorded_dependencies(snapshot: dict) -> list[str]:
 def affects(dependencies: list[str] | None, changed: str) -> bool:
     if not dependencies:
         return True  # Legacy/failed analysis has no reliable input manifest.
+    if changed in dependencies:
+        return True
     field = get_catalog_field(changed)
     key = field.storage if field and field.storage not in {"vault_value", "person"} else changed
     return key in dependencies or any(item.startswith((key + ":", key + ".")) for item in dependencies)

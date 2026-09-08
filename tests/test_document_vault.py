@@ -178,7 +178,12 @@ def test_review_can_reject_candidates(postgres_ready):
             )
             session.add(doc)
             await session.flush()
+            from pai.domains.documents.models import DocumentAnalysisRun
+            run = DocumentAnalysisRun(document_id=doc.id, pipeline_version="test", status="completed")
+            session.add(run)
+            await session.flush()
             cand = DocumentCandidate(
+                analysis_run_id=run.id,
                 document_id=doc.id,
                 person_id=person.id,
                 field_key="identity.full_name",
@@ -234,7 +239,12 @@ def test_identity_mismatch_blocks_candidate_accept(postgres_ready):
             )
             session.add(doc)
             await session.flush()
+            from pai.domains.documents.models import DocumentAnalysisRun
+            run = DocumentAnalysisRun(document_id=doc.id, pipeline_version="test", status="completed")
+            session.add(run)
+            await session.flush()
             cand = DocumentCandidate(
+                analysis_run_id=run.id,
                 document_id=doc.id,
                 person_id=person.id,
                 field_key="education.gpa",

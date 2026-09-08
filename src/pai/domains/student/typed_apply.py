@@ -511,12 +511,12 @@ async def _apply_education_one(
         )
         row = existing
         status = "updated"
-    elif not institution or invented:
+    elif invented or not (institution or payload.get("degree")):
         return TypedApplyResult(candidate.field_key, "rejected", candidate.confidence)
     else:
         row = Education(
             person_id=person.id,
-            institution=payload["institution"],
+            institution=payload.get("institution"),
             degree=payload.get("degree"),
             major=payload.get("major"),
             gpa=payload.get("gpa"),

@@ -358,8 +358,8 @@ async def test_transcript_updates_the_chat_record_instead_of_duplicating(postgre
         )
         assert len(rows) == 1
         assert rows[0].percentage == 82.2
-        assert rows[0].canonical_level == "higher_secondary"
-        assert rows[0].framework == "HSSC"
+        assert rows[0].canonical_level is None
+        assert rows[0].framework is None
 
 
 @pytest.mark.asyncio
@@ -443,10 +443,10 @@ async def test_missing_stage_is_recorded_and_clears_when_filled(postgres_ready):
             person,
             [
                 _edu_candidate(
-                    {"institution": "City School", "degree": "Matric", "graduation_year": 2020}
+                    {"institution": "City School", "degree": "Matric", "graduation_year": 2020, "canonical_level": "secondary", "mapping_source": "test:verified-mapping"}
                 ),
                 _edu_candidate(
-                    {"institution": "Bahria University", "degree": "BSCS", "graduation_year": 2026}
+                    {"institution": "Bahria University", "degree": "BSCS", "graduation_year": 2026, "canonical_level": "bachelor", "mapping_source": "test:verified-mapping"}
                 ),
             ],
         )
@@ -483,6 +483,8 @@ async def test_missing_stage_is_recorded_and_clears_when_filled(postgres_ready):
                         "institution": "Punjab College",
                         "degree": "FSc Pre-Engineering",
                         "graduation_year": 2022,
+                        "canonical_level": "higher_secondary",
+                        "mapping_source": "test:verified-mapping",
                     }
                 )
             ],

@@ -39,6 +39,8 @@ def test_new_safe_non_critical_can_apply():
             incoming_value=[{"name": "Python"}],
             existing_value=None,
             evidence_text="Skills: Python",
+            identity_status="matched",
+            exact_value_grounding=True,
             source_authority="medium",
             field_criticality="normal",
             extraction_confidence=0.95,
