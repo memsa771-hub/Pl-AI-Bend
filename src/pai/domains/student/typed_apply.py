@@ -46,6 +46,17 @@ from pai.kernel.contracts.schemas import VaultCandidate
 
 EDUCATION_ENTITY = "education"
 
+# GoalService reports what it did to the goal row (GoalWriteAction); typed apply must
+# report a vault apply outcome. These are different vocabularies, so translate
+# explicitly instead of leaking the goal-write action to vault consumers.
+_GOAL_ACTION_TO_APPLY_STATUS = {
+    "create": "accepted",
+    "create_secondary": "accepted",
+    "switch": "updated",
+    "reinforce": "reinforced",
+    "none": "rejected",
+}
+
 
 class TypedApplyResult:
     __slots__ = ("field_key", "status", "confidence")
@@ -911,13 +922,16 @@ async def apply_typed_candidate(
             ):
                 await enqueue_goal_intelligence_job(session, goal)
             old = _goal_snap(goal) if goal is not None else None
-            status = action
+            status = _GOAL_ACTION_TO_APPLY_STATUS.get(str(action), "rejected")
         except Exception:
             import logging as _log
             _log.getLogger(__name__).exception("GoalService upsert failed; falling back to legacy")
             goal, status, old = await _upsert_career_goal(
                 session, person, title, vault_status=vault_status
             )
+        if goal is None:
+            # Nothing was written, so there is no scope to expand and nothing to log.
+            return TypedApplyResult(candidate.field_key, "rejected", candidate.confidence)
         await expand_scope_for_person(session, person, SCOPE_BY_RESOURCE["goals"])
         await _log_typed_history(
             session,
@@ -929,7 +943,7 @@ async def apply_typed_candidate(
         )
         if recompute_completion and person.vault:
             await apply_completion_to_vault(session, person, person.vault)
-        out = "pending" if vault_status == "pending" else status
+        out = "pending" if vault_status == "pending" and status != "rejected" else status
         return TypedApplyResult(candidate.field_key, out, candidate.confidence)
 
     if field.storage == "skills":
