@@ -182,6 +182,25 @@ def resolve_education(payload: dict[str, Any], rows: list[Any]) -> ResolutionOut
     if not rows:
         return ResolutionOutcome(None, 0.0, False, reason="no_existing_records")
 
+    if payload.get("id"):
+        matches = [row for row in rows if str(row.id) == str(payload["id"])]
+        if len(matches) == 1:
+            return ResolutionOutcome(matches[0], 1.0, False, reason="explicit_owned_id")
+        return ResolutionOutcome(None, 0.0, True, reason="unknown_record_id")
+
+    # Native names can identify a record without an inferred canonical level.
+    exact = [row for row in rows
+             if payload.get("degree") and payload.get("major")
+             and _norm(payload["degree"]) == _norm(row.degree)
+             and _norm(payload["major"]) == _norm(row.major)
+             and score_record(payload, row) is not None
+             and (not payload.get("institution") or not row.institution
+                  or _norm(payload["institution"]) == _norm(row.institution))]
+    if len(exact) == 1:
+        return ResolutionOutcome(exact[0], 1.0, False, reason="exact_native_qualification")
+    if len(exact) > 1:
+        return ResolutionOutcome(None, 0.0, True, rivals=exact, reason="duplicate_native_qualifications")
+
     if _is_bare_measurement(payload):
         # "I got 82%" with no other signal. One record means it is unambiguous;
         # several means guessing, which is exactly what doc §10 forbids.
