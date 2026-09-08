@@ -121,12 +121,12 @@ class Settings(BaseSettings):
     # back to lexical ranking, which looks like working software. Latency is
     # regional, so this is a knob — but the default must let a normal call
     # finish, not merely bound the wait.
-    embedding_timeout_seconds: float = Field(default=3.0, gt=0, alias="EMBEDDING_TIMEOUT_SECONDS")
+    embedding_timeout_seconds: float = Field(default=6.0, gt=0, alias="EMBEDDING_TIMEOUT_SECONDS")
     # Must exceed embedding_timeout_seconds: recall embeds the query first, so a
     # budget below it can never succeed. No le= ceiling — a deployment far from
     # the provider has to be able to raise this.
-    memory_recall_budget_seconds: float = Field(default=4.0, gt=0, alias="MEMORY_RECALL_BUDGET_SECONDS")
-    turn_understanding_budget_seconds: float = Field(default=2.0, gt=0, le=3, alias="TURN_UNDERSTANDING_BUDGET_SECONDS")
+    memory_recall_budget_seconds: float = Field(default=8.0, gt=0, alias="MEMORY_RECALL_BUDGET_SECONDS")
+    turn_understanding_budget_seconds: float = Field(default=8.0, gt=0, alias="TURN_UNDERSTANDING_BUDGET_SECONDS")
     memory_rerank_url: str = Field(default="", alias="MEMORY_RERANK_URL")
     memory_rerank_api_key: str = Field(default="", alias="MEMORY_RERANK_API_KEY")
     memory_rerank_model: str = Field(default="", alias="MEMORY_RERANK_MODEL")
@@ -137,11 +137,13 @@ class Settings(BaseSettings):
     enable_rate_limits: bool = Field(default=True, alias="ENABLE_RATE_LIMITS")
     rate_limit_fail_closed: bool = Field(default=False, alias="RATE_LIMIT_FAIL_CLOSED")
     # consume() runs a clock read plus an upsert per counter and commits, which
-    # measures ~1.7s steady against a pooled remote database. At 1.0s it never
-    # completed, so limits were not enforced. Keep a five-second ceiling because
-    # this work runs before every request and the configured policy fails open.
+    # measures ~1.7s steady and ~7.9s cold against a pooled Supabase in another
+    # region. At 1.0s it never completed: the limiter failed open on every
+    # request, so limits were not enforced at all. No le= ceiling — a cold
+    # connection needs more than 5s and the ceiling made that unreachable
+    # from .env.
     rate_limit_backend_timeout_seconds: float = Field(
-        default=2.5, gt=0, le=5, alias="RATE_LIMIT_BACKEND_TIMEOUT_SECONDS"
+        default=10.0, gt=0, alias="RATE_LIMIT_BACKEND_TIMEOUT_SECONDS"
     )
     request_limit_per_minute: int = Field(default=120, gt=0, alias="REQUEST_LIMIT_PER_MINUTE")
     user_request_limit_per_minute: int = Field(default=60, gt=0, alias="USER_REQUEST_LIMIT_PER_MINUTE")
